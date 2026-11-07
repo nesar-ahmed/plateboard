@@ -35,6 +35,7 @@ logger = logging.getLogger(__name__)
 
 OPENAPI_TAGS = [
     {"name": "system", "description": "Health probes and service metadata."},
+    {"name": "auth", "description": "Accounts and server-side sessions."},
     {"name": "v1", "description": "API version 1 - under development."},
 ]
 

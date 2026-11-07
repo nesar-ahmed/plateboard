@@ -3,8 +3,9 @@
 Two independent apps that each run as their own process:
 
 - **Backend** — FastAPI + SQLAlchemy 2 (async) on **SQLite with WAL mode and
-  foreign keys enabled**, schema managed by **Alembic**. API v1 lives in
-  `backend/app/api/v1/` and is a work in progress. See `backend/README.md`.
+  foreign keys enabled**, schema managed by **Alembic**. Includes cookie-based
+  auth (register/login/logout/me). API v1 lives in `backend/app/api/v1/` and is
+  a work in progress. See `backend/README.md`.
 - **Frontend** — React (Next.js 16), built in **`standalone` mode**: a
   self-contained Node server (`frontend/.next/standalone/`) you run directly,
   under **pm2**, or behind an **nginx** reverse proxy on a VPS. It shows the
@@ -53,7 +54,7 @@ identical in production.
 
 ```bash
 cd backend
-uv run pytest            # 11 tests: health, SQLite pragmas, migrations, API surface
+uv run pytest            # 30 tests: health, auth, SQLite pragmas, migrations, API surface
 uv run ruff check app tests migrations
 uv run mypy app
 ```
@@ -72,7 +73,8 @@ file lands there no matter where you start the process from.
 
 Schema changes are managed with **Alembic** (installed, so no raw-SQL runner is
 needed); migrations live in `backend/migrations/versions/`
-(`0001_baseline.py` is the clean v1 starting point).
+(`0001_baseline.py` starts the v1 slate, `0002_auth_users_sessions.py` adds the
+`users` + `sessions` tables).
 
 ```bash
 cd backend
@@ -138,12 +140,14 @@ files list every variable. Precedence: explicit `Settings(...)` kwargs (tests)
 > real env vars > `.env` > code defaults. Backend settings are declared and
 validated in `backend/app/core/config.py`:
 
-| Variable        | Default                                 | Notes                               |
-| --------------- | --------------------------------------- | ----------------------------------- |
-| `DATABASE_URL`  | `sqlite+aiosqlite:///./plateboard.db`   | relative paths anchor to `backend/` |
-| `ENVIRONMENT`   | `local`                                 | `production` hides `/docs` + openapi |
-| `CORS_ORIGINS`  | `http://localhost:3000,...`             | only needed if a browser hits the API cross-origin |
-| `LOG_LEVEL`     | `INFO`                                  |                                     |
+| Variable             | Default                                 | Notes                               |
+| -------------------- | --------------------------------------- | ----------------------------------- |
+| `DATABASE_URL`       | `sqlite+aiosqlite:///./plateboard.db`   | relative paths anchor to `backend/` |
+| `ENVIRONMENT`        | `local`                                 | `production` hides `/docs` + openapi |
+| `CORS_ORIGINS`       | `http://localhost:3000,...`             | only needed if a browser hits the API cross-origin |
+| `LOG_LEVEL`          | `INFO`                                  |                                     |
+| `SESSION_COOKIE_NAME`| `plateboard_session`                    | HTTP-only session cookie name       |
+| `SESSION_TTL_DAYS`   | `7`                                     | server-side session lifetime        |
 
 Frontend-side variables (Next.js):
 
@@ -154,12 +158,22 @@ Frontend-side variables (Next.js):
 
 ## API surface
 
-| Method | Path           | Description                                              |
-| ------ | -------------- | -------------------------------------------------------- |
-| GET    | `/api/health`  | Health probe: API + database status, SQLite pragmas      |
-| GET    | `/api/v1`      | v1 marker (`{"version": "v1", ...}`)                     |
-| GET    | `/`            | Backend service metadata (JSON) - the UI is served by the frontend process |
-| GET    | `/docs`        | OpenAPI playground (disabled when `ENVIRONMENT=production`) |
+| Method | Path               | Description                                              |
+| ------ | ------------------ | -------------------------------------------------------- |
+| GET    | `/api/health`      | Health probe: API + database status, SQLite pragmas      |
+| POST   | `/api/auth/register` | Create account (email lowercased, salted scrypt hash)  |
+| POST   | `/api/auth/login`  | Sets HTTP-only `plateboard_session` cookie (server-side session) |
+| POST   | `/api/auth/logout` | Revokes the session server-side, clears the cookie       |
+| GET    | `/api/me`          | Current user (401 without an active session)             |
+| GET    | `/api/v1`          | v1 marker (`{"version": "v1", ...}`)                     |
+| GET    | `/`                | Backend service metadata (JSON) - the UI is served by the frontend process |
+| GET    | `/docs`            | OpenAPI playground (disabled when `ENVIRONMENT=production`) |
+
+Auth rules: passwords >= 8 chars hashed with stdlib `hashlib.scrypt` +
+per-user random salt; emails unique/checked case-insensitively; failed logins
+always return the same generic 401 (no account-existence leak); sessions are
+stored as SHA-256 token hashes in the `sessions` table, so a DB leak cannot
+replay logins.
 
 ## Layout
 
@@ -176,6 +190,7 @@ backend/
   app/
     api/
       health.py               # GET /api/health (intentionally NOT versioned)
+      auth/                   # register/login/logout/me + scrypt hashing + sessions
       router.py               # mounts everything under /api
       deps.py                 # shared FastAPI dependencies (DB session)
       v1/                     # API version 1 - under development

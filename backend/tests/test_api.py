@@ -32,3 +32,9 @@ async def test_openapi_documents_the_api_surface(client) -> None:
     paths = response.json()["paths"]
     assert "/api/health" in paths
     assert "/api/v1" in paths
+    assert {
+        "/api/auth/register",
+        "/api/auth/login",
+        "/api/auth/logout",
+        "/api/me",
+    } <= set(paths)

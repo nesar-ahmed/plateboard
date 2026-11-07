@@ -12,11 +12,14 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
+from app.api.auth import auth_router
 from app.api.health import router as health_router
 from app.api.v1 import v1_router
 
 api_router = APIRouter()
 api_router.include_router(health_router)
+# Auth lives un-versioned next to health (fixed URLs for infra + frontend).
+api_router.include_router(auth_router)
 # FastAPI bakes each router's own prefix into its routes at decoration time
 # ("/v1" above), so the "/api" root is attached here, at assembly.
 api_router.include_router(v1_router, prefix="/api")

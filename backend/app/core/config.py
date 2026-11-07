@@ -68,6 +68,11 @@ class Settings(BaseSettings):
     ]
     TRUST_X_FORWARDED_HOST: bool = False
 
+    # --- sessions ---------------------------------------------------------
+    # Server-side sessions (table `sessions`) carried in an HTTP-only cookie.
+    SESSION_COOKIE_NAME: str = "plateboard_session"
+    SESSION_TTL_DAYS: int = 7
+
     # --- observability ---------------------------------------------------
     LOG_LEVEL: Literal["CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"] = "INFO"
     LOG_JSON: bool = False

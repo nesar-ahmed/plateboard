@@ -18,6 +18,8 @@ uv run python -m app.main        # migrates, then serves the API on :8000
 
 - API metadata: <http://127.0.0.1:8000/>
 - Health probe: <http://127.0.0.1:8000/api/health>
+- Auth: `POST /api/auth/register`, `POST /api/auth/login`,
+  `POST /api/auth/logout`, `GET /api/me` (HTTP-only session cookie)
 - Docs: <http://127.0.0.1:8000/docs>
 
 Flags: `--host`, `--port`, `--reload`. Alternate entry point:
@@ -51,14 +53,15 @@ uv run alembic revision --autogenerate -m "add widgets"   # after defining a mod
 uv run alembic downgrade -1
 ```
 
-Migrations live in `migrations/versions/`; `0001_baseline.py` is the clean v1
-starting point. `migrations/env.py` reads the DSN from settings (never from
-`alembic.ini`), and `uv run python -m app.main` runs `upgrade head` on boot.
+Migrations live in `migrations/versions/` (`0001_baseline.py` starts the v1
+slate, `0002_auth_users_sessions.py` adds the auth tables). `migrations/env.py`
+reads the DSN from settings (never from `alembic.ini`), and
+`uv run python -m app.main` runs `upgrade head` on boot.
 
 ## Tests
 
 ```bash
-uv run pytest                       # 11 tests
+uv run pytest                       # 30 tests
 uv run pytest --cov=app             # with coverage
 uv run ruff check app tests migrations
 uv run mypy app
@@ -74,7 +77,8 @@ foreign-key pragmas for real.
 app/
   api/
     health.py     # GET /api/health (NOT versioned - stable probe URL)
-    router.py     # mounts /api (health + v1)
+    auth/         # accounts + sessions: router, service, models, scrypt hashing
+    router.py     # mounts /api (health + auth + v1)
     deps.py       # shared DB-session dependency
     v1/           # API version 1, under development
   core/           # settings, engine (WAL/FK pragmas), logging, error envelope
@@ -89,6 +93,10 @@ tests/            # isolated temp-DB fixtures + health/migrations/API-surface te
 | Method | Path          | Description                                   |
 | ------ | ------------- | --------------------------------------------- |
 | GET    | `/api/health` | API + database status and SQLite pragmas      |
+| POST   | `/api/auth/register` | Create account (409 on taken email, 422 short password) |
+| POST   | `/api/auth/login`    | Generic 401 on any bad credentials; sets HTTP-only session cookie |
+| POST   | `/api/auth/logout`   | Revokes the session server-side (401 without one) |
+| GET    | `/api/me`     | Current user from the session cookie          |
 | GET    | `/api/v1`     | v1 marker; feature routers get mounted here   |
 | GET    | `/`           | Backend service metadata (JSON)               |
 

@@ -13,10 +13,10 @@ from alembic import command
 
 from tests.conftest import make_alembic_config
 
-EXPECTED_HEAD = "0001"
+EXPECTED_HEAD = "0002"
 
 
-def test_upgrade_head_stamps_the_baseline_version(environment, tmp_path: Path) -> None:
+def test_upgrade_head_stamps_the_current_head(environment, tmp_path: Path) -> None:
     conn = sqlite3.connect(tmp_path / "test.db")
     try:
         row = conn.execute("SELECT version_num FROM alembic_version").fetchone()
