@@ -1,0 +1,33 @@
+# --- Python / backend -------------------------------------------------------
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+
+# --- SQLite runtime databases (backend/plateboard.db lives at the backend root)
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+
+# --- Node / frontend ---------------------------------------------------------
+node_modules/
+/frontend/.next/
+/frontend/next-env.d.ts
+*.tsbuildinfo
+npm-debug.log*
+
+# --- environment overrides ---------------------------------------------------
+.env
+.env.*
+!.env.example
+
+# --- misc ---------------------------------------------------------------------
+.DS_Store
+*.pem
+.vercel/

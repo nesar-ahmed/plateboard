@@ -1,0 +1,81 @@
+"""Pytest configuration: every test gets its own temporary SQLite database.
+
+Isolation by construction:
+
+* ``DATABASE_URL`` points at a fresh file under ``tmp_path`` (a real file DB,
+  so WAL mode and the SQLite pragmas are genuinely exercised),
+* Alembic migrations are applied to that file before the app is created -
+  tests run the exact same schema path as production.
+
+Nothing here touches ``backend/plateboard.db``.
+"""
+
+from __future__ import annotations
+
+from collections.abc import AsyncIterator, Iterator
+from pathlib import Path
+
+import pytest
+from alembic import command
+from alembic.config import Config as AlembicConfig
+from httpx import ASGITransport, AsyncClient
+
+from app.core.config import BACKEND_ROOT, Settings, reload_settings
+from app.core.db import build_engine, dispose_engine, set_engine
+from app.main import create_app
+
+
+def make_alembic_config() -> AlembicConfig:
+    """Alembic config with absolute paths, usable from any working directory."""
+    config = AlembicConfig(str(BACKEND_ROOT / "alembic.ini"))
+    config.set_main_option("script_location", str(BACKEND_ROOT / "migrations"))
+    config.set_main_option("prepend_sys_path", str(BACKEND_ROOT))
+    return config
+
+
+@pytest.fixture
+def environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Settings:
+    """Temp file database (migrated to head), settings pointed at it.
+
+    Sync on purpose: ``migrations/env.py`` drives its own event loop, which
+    must not collide with pytest-asyncio's.
+    """
+    database_file = tmp_path / "test.db"
+
+    monkeypatch.setenv("DATABASE_URL", f"sqlite+aiosqlite:///{database_file}")
+    monkeypatch.setenv("ENVIRONMENT", "test")
+    monkeypatch.setenv("CORS_ORIGINS", "http://testserver")
+    settings = reload_settings()
+
+    # Apply the real migrations to the temp database.
+    command.upgrade(make_alembic_config(), "head")
+    return settings
+
+
+@pytest.fixture
+async def client(environment: Settings) -> AsyncIterator[AsyncClient]:
+    """Async HTTP client driving the real ASGI app against the temp database."""
+    engine = build_engine(environment.DATABASE_URL)
+    set_engine(engine)
+    try:
+        app = create_app(environment)
+        transport = ASGITransport(app=app)
+        async with AsyncClient(
+            transport=transport, base_url="http://testserver"
+        ) as instance:
+            yield instance
+    finally:
+        await dispose_engine()
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    """Custom markers used by the suite."""
+    config.addinivalue_line("markers", "integration: touches the real ASGI app")
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _settings_cache() -> Iterator[None]:
+    """Guarantee the settings cache starts and ends the run in a clean state."""
+    reload_settings()
+    yield
+    reload_settings()
