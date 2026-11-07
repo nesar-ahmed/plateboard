@@ -18,7 +18,7 @@ from app.api.auth.exceptions import (
     UnauthenticatedError,
 )
 from app.api.auth.models import User, UserSession
-from app.api.auth.schemas import LoginRequest, RegisterRequest
+from app.api.auth.schemas import LoginRequest, ProfilePatchRequest, RegisterRequest
 from app.api.auth.security import (
     hash_password,
     hash_token,
@@ -76,6 +76,21 @@ async def logout(session: AsyncSession, current: UserSession) -> None:
     """Revoke server-side; deleting the cookie alone would leave it replayable."""
     current.revoked_at = utcnow()
     await session.commit()
+
+
+async def update_profile(
+    session: AsyncSession, user: User, payload: ProfilePatchRequest
+) -> User:
+    """Apply the optional fields of a ProfilePatchRequest; None means 'keep'."""
+    if payload.display_name is not None:
+        user.display_name = payload.display_name
+    if payload.bio is not None:
+        user.bio = payload.bio
+    if payload.area is not None:
+        user.area = payload.area
+    await session.commit()
+    await session.refresh(user)
+    return user
 
 
 async def current_user(session: AsyncSession, token: str) -> User:

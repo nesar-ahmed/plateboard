@@ -3,9 +3,9 @@
 Two independent apps that each run as their own process:
 
 - **Backend** — FastAPI + SQLAlchemy 2 (async) on **SQLite with WAL mode and
-  foreign keys enabled**, schema managed by **Alembic**. Includes cookie-based
-  auth (register/login/logout/me). API v1 lives in `backend/app/api/v1/` and is
-  a work in progress. See `backend/README.md`.
+  foreign keys enabled**, schema managed by **Alembic**. Cookie auth with
+  **roles (customer/cook)**, editable profiles and cook endpoints. API v1 lives
+  in `backend/app/api/v1/` and is a work in progress. See `backend/README.md`.
 - **Frontend** — React (Next.js 16), built in **`standalone` mode**: a
   self-contained Node server (`frontend/.next/standalone/`) you run directly,
   under **pm2**, or behind an **nginx** reverse proxy on a VPS. It shows the
@@ -54,7 +54,7 @@ identical in production.
 
 ```bash
 cd backend
-uv run pytest            # 30 tests: health, auth, SQLite pragmas, migrations, API surface
+uv run pytest            # 50 tests: health, auth, roles/cooks, profiles, pragmas, migrations, API surface
 uv run ruff check app tests migrations
 uv run mypy app
 ```
@@ -73,8 +73,8 @@ file lands there no matter where you start the process from.
 
 Schema changes are managed with **Alembic** (installed, so no raw-SQL runner is
 needed); migrations live in `backend/migrations/versions/`
-(`0001_baseline.py` starts the v1 slate, `0002_auth_users_sessions.py` adds the
-`users` + `sessions` tables).
+(`0001_baseline.py` starts the v1 slate, `0002` adds auth, `0003` adds roles,
+profile fields and the cooks table).
 
 ```bash
 cd backend
@@ -161,10 +161,14 @@ Frontend-side variables (Next.js):
 | Method | Path               | Description                                              |
 | ------ | ------------------ | -------------------------------------------------------- |
 | GET    | `/api/health`      | Health probe: API + database status, SQLite pragmas      |
-| POST   | `/api/auth/register` | Create account (email lowercased, salted scrypt hash)  |
+| POST   | `/api/auth/register` | Create account (email lowercased, salted scrypt hash); default role: customer |
 | POST   | `/api/auth/login`  | Sets HTTP-only `plateboard_session` cookie (server-side session) |
 | POST   | `/api/auth/logout` | Revokes the session server-side, clears the cookie       |
-| GET    | `/api/me`          | Current user (401 without an active session)             |
+| GET    | `/api/me`          | Current user incl. profile fields + roles (401 without an active session) |
+| PATCH  | `/api/me/profile`  | Edit `display_name` (≤60), `bio` (≤500), `area` (≤120)   |
+| POST   | `/api/cooks`       | Become a cook: creates cook profile (headline ≤80, specialty tags), adds `cook` role |
+| GET    | `/api/cooks/me`    | My cook profile - **403 for non-cooks**                  |
+| PATCH  | `/api/cooks/me`    | Update cook headline/specialties - **403 for non-cooks** |
 | GET    | `/api/v1`          | v1 marker (`{"version": "v1", ...}`)                     |
 | GET    | `/`                | Backend service metadata (JSON) - the UI is served by the frontend process |
 | GET    | `/docs`            | OpenAPI playground (disabled when `ENVIRONMENT=production`) |
@@ -173,7 +177,9 @@ Auth rules: passwords >= 8 chars hashed with stdlib `hashlib.scrypt` +
 per-user random salt; emails unique/checked case-insensitively; failed logins
 always return the same generic 401 (no account-existence leak); sessions are
 stored as SHA-256 token hashes in the `sessions` table, so a DB leak cannot
-replay logins.
+replay logins. Roles are additive (`customer`, `cook`, or both) and enforced by
+the `require_login` / `require_cook` dependencies - 401 always outranks 403 so
+anonymous callers learn nothing about cook endpoints.
 
 ## Layout
 
@@ -190,7 +196,8 @@ backend/
   app/
     api/
       health.py               # GET /api/health (intentionally NOT versioned)
-      auth/                   # register/login/logout/me + scrypt hashing + sessions
+      auth/                   # accounts, roles, profiles: scrypt hashing + sessions
+      cooks/                  # become-a-cook action + cook-only endpoints
       router.py               # mounts everything under /api
       deps.py                 # shared FastAPI dependencies (DB session)
       v1/                     # API version 1 - under development

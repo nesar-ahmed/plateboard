@@ -5,7 +5,7 @@ before metadata or relationships are used. Adding a model means adding one
 import here - nothing else needs to know the model list.
 """
 
-from app.api.auth.models import User, UserSession
+from app.api.auth.models import CookProfile, User, UserSession
 from app.shared.base import Base
 
-__all__ = ["Base", "User", "UserSession"]
+__all__ = ["Base", "CookProfile", "User", "UserSession"]

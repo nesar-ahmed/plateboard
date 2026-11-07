@@ -13,8 +13,13 @@ from __future__ import annotations
 from fastapi import APIRouter, Response
 
 from app.api.auth import service
-from app.api.auth.dependencies import CurrentSession, CurrentUser
-from app.api.auth.schemas import LoginRequest, RegisterRequest, UserOut
+from app.api.auth.dependencies import CurrentSession, LoginRequired
+from app.api.auth.schemas import (
+    LoginRequest,
+    ProfilePatchRequest,
+    RegisterRequest,
+    UserOut,
+)
 from app.api.deps import DbSession
 from app.core.config import get_settings
 
@@ -56,5 +61,15 @@ async def logout(db: DbSession, current: CurrentSession) -> Response:
 
 
 @auth_router.get("/me", response_model=UserOut)
-async def me(user: CurrentUser) -> UserOut:
+async def me(user: LoginRequired) -> UserOut:
     return UserOut.model_validate(user)
+
+
+@auth_router.patch("/me/profile", response_model=UserOut)
+async def patch_profile(
+    payload: ProfilePatchRequest, user: LoginRequired, db: DbSession
+) -> UserOut:
+    """Edit display name / bio / free-text area. Length limits live in
+    ProfilePatchRequest; a blank body or oversized field is a 422."""
+    updated = await service.update_profile(db, user, payload)
+    return UserOut.model_validate(updated)

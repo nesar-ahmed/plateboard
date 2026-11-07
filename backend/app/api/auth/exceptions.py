@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from fastapi import status
+
 from app.core.exceptions import AppError
 
 
@@ -26,3 +28,11 @@ class EmailTakenError(AppError):
     status_code = 409
     code = "email_taken"
     default_message = "An account with this email already exists"
+
+
+class ForbiddenError(AppError):
+    """Authenticated but lacking a required role (e.g. cook endpoints)."""
+
+    status_code = status.HTTP_403_FORBIDDEN
+    code = "forbidden"
+    default_message = "This action requires additional privileges"

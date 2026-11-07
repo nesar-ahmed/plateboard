@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from alembic import command
@@ -79,3 +80,52 @@ def _settings_cache() -> Iterator[None]:
     reload_settings()
     yield
     reload_settings()
+
+
+# --- reusable auth plumbing for feature tests -------------------------------
+
+DEFAULT_PASSWORD = "super-secret-passphrase"
+COOK_BODY = {"headline": "Home chef of the decade", "specialties": ["biryani", "korma"]}
+
+
+@pytest.fixture
+def accounts(client):
+    """Convenience calls built on the shared ``client`` (cookie jar included).
+
+    After ``login()`` the jar holds the session, so later requests are
+    authenticated without touching cookies manually.
+    """
+
+    async def register(
+        email: str = "user@example.com", password: str = DEFAULT_PASSWORD
+    ):
+        return await client.post(
+            "/api/auth/register", json={"email": email, "password": password}
+        )
+
+    async def login(email: str = "user@example.com", password: str = DEFAULT_PASSWORD):
+        return await client.post(
+            "/api/auth/login", json={"email": email, "password": password}
+        )
+
+    async def become_cook(body: dict | None = None):
+        return await client.post("/api/cooks", json=body or COOK_BODY)
+
+    async def customer(email: str = "user@example.com"):
+        """Register + login in one step; returns the login response."""
+        await register(email)
+        return await login(email)
+
+    async def cook(email: str = "chef@example.com"):
+        """Register + login + become-cook; returns the become response."""
+        await customer(email)
+        return await become_cook()
+
+    return SimpleNamespace(
+        client=client,
+        register=register,
+        login=login,
+        become_cook=become_cook,
+        customer=customer,
+        cook=cook,
+    )

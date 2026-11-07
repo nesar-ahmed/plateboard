@@ -37,4 +37,7 @@ async def test_openapi_documents_the_api_surface(client) -> None:
         "/api/auth/login",
         "/api/auth/logout",
         "/api/me",
+        "/api/me/profile",
+        "/api/cooks",
+        "/api/cooks/me",
     } <= set(paths)

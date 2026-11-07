@@ -13,7 +13,7 @@ from alembic import command
 
 from tests.conftest import make_alembic_config
 
-EXPECTED_HEAD = "0002"
+EXPECTED_HEAD = "0003"
 
 
 def test_upgrade_head_stamps_the_current_head(environment, tmp_path: Path) -> None:
