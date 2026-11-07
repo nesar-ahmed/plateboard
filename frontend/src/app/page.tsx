@@ -1,144 +1,128 @@
 "use client";
 
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import Link from "next/link";
+import { useCallback, useEffect, useState } from "react";
 
-type Health = {
-  status: string;
-  version?: string;
-  environment?: string;
-  database?: string;
-  database_info?: {
-    engine?: string;
-    journal_mode?: string;
-    foreign_keys?: boolean;
-  };
-};
+import { AllergenTag, Card, ErrorBanner, Pager, Tag, inputClass } from "@/components/ui";
+import { api, ApiError, type DishPage } from "@/lib/api";
+import { formatMinorUnits } from "@/lib/format";
 
-const HEALTH_URL = "/api/health";
-const REFRESH_INTERVAL_MS = 5_000;
+const PAGE_SIZE = 12;
 
-function Dot({ tone, label }: { tone: "good" | "bad" | "waiting"; label: string }) {
-  return (
-    <span
-      className={`inline-flex items-center gap-2 rounded-full px-3 py-1 font-mono text-sm ${
-        tone === "good"
-          ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900 dark:text-emerald-200"
-          : tone === "bad"
-            ? "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200"
-            : "bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400"
-      }`}
-    >
-      <span
-        className={`h-2 w-2 rounded-full ${
-          tone === "good" ? "bg-emerald-500" : tone === "bad" ? "bg-red-500" : "bg-zinc-400"
-        }`}
-      />
-      {label}
-    </span>
-  );
-}
+/** Public dish list: active dishes only, `?q=` name search, prev/next paging. */
+export default function DishDirectory() {
+  const [query, setQuery] = useState("");
+  const [submittedQuery, setSubmittedQuery] = useState("");
+  const [offset, setOffset] = useState(0);
+  const [page, setPage] = useState<DishPage | null>(null);
+  const [error, setError] = useState<string[]>([]);
 
-function Row({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div className="flex items-center justify-between gap-6 border-b border-zinc-100 py-3 last:border-none dark:border-zinc-800">
-      <dt className="text-sm text-zinc-500 dark:text-zinc-400">{label}</dt>
-      <dd className="text-right font-mono text-sm text-zinc-900 dark:text-zinc-100">{children}</dd>
-    </div>
-  );
-}
-
-export default function Home() {
-  const [health, setHealth] = useState<Health | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [checkedAt, setCheckedAt] = useState<Date | null>(null);
-
-  const check = useCallback(async () => {
+  const load = useCallback(async () => {
+    const params = new URLSearchParams({
+      limit: String(PAGE_SIZE),
+      offset: String(offset),
+    });
+    if (submittedQuery) params.set("q", submittedQuery);
     try {
-      const response = await fetch(HEALTH_URL, { cache: "no-store" });
-      const body = (await response.json()) as Health;
-      setHealth({ ...body, status: response.ok ? body.status : `${body.status} (${response.status})` });
-      setError(response.ok ? null : `HTTP ${response.status}`);
+      setPage(await api.get<DishPage>(`/dishes?${params.toString()}`));
+      setError([]);
     } catch (cause) {
-      setHealth(null);
-      setError(cause instanceof Error ? cause.message : "request failed");
-    } finally {
-      setCheckedAt(new Date());
+      setPage(null);
+      setError(cause instanceof ApiError ? [cause.message] : ["Could not reach the API"]);
     }
-  }, []);
+  }, [offset, submittedQuery]);
 
   useEffect(() => {
-    // Fire the first probe from a callback (timeout 0) rather than the effect
-    // body itself: the body must not set state synchronously
-    // (react-hooks/set-state-in-effect).
-    const kickOff = window.setTimeout(() => void check(), 0);
-    const timer = window.setInterval(() => void check(), REFRESH_INTERVAL_MS);
-    return () => {
-      window.clearTimeout(kickOff);
-      window.clearInterval(timer);
-    };
-  }, [check]);
+    // Timeout kick-off so the effect body does not call a setState-transitive
+    // function directly (react-hooks/set-state-in-effect).
+    const kickOff = window.setTimeout(() => void load(), 0);
+    return () => window.clearTimeout(kickOff);
+  }, [load]);
 
-  const status = health?.status ?? (error ? "down" : "checking");
-  const tone = status === "ok" ? "good" : error || (health && health.status !== "ok") ? "bad" : "waiting";
+  const search = (event: React.FormEvent) => {
+    event.preventDefault();
+    setOffset(0);
+    setSubmittedQuery(query.trim());
+  };
 
   return (
-    <main className="flex min-h-screen flex-col items-center justify-center gap-8 p-8 font-sans">
-      <div className="w-full max-w-md rounded-2xl border border-zinc-200 bg-white p-8 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
-        <header className="mb-6 flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
-              Plateboard
-            </h1>
-            <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">Backend health</p>
-          </div>
-          <Dot tone={tone} label={status} />
-        </header>
+    <div className="space-y-6">
+      <header>
+        <h1 className="text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
+          Dishes from local home cooks
+        </h1>
+        <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
+          Only active menu items are listed. Prices are shown per dish.
+        </p>
+      </header>
 
-        <dl>
-          <Row label="API status">
-            <Dot tone={health?.status === "ok" ? "good" : health ? "bad" : "waiting"} label={health?.status ?? "…"} />
-          </Row>
-          <Row label="Database">
-            <Dot
-              tone={health?.database === "ok" ? "good" : health ? "bad" : "waiting"}
-              label={health?.database ?? "…"}
-            />
-          </Row>
-          {health?.database_info?.engine === "sqlite" && (
-            <>
-              <Row label="Journal mode">
-                <code>{health.database_info.journal_mode}</code>
-              </Row>
-              <Row label="Foreign keys">
-                <code>{health.database_info.foreign_keys ? "on" : "off"}</code>
-              </Row>
-            </>
-          )}
-          <Row label="Version">
-            <code>{health?.version ?? "—"}</code>
-          </Row>
-          <Row label="Environment">
-            <code>{health?.environment ?? "—"}</code>
-          </Row>
-        </dl>
+      <form onSubmit={search} className="flex max-w-md gap-2">
+        <input
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          placeholder="Search by name, e.g. biryani"
+          aria-label="Search dishes by name"
+          className={inputClass}
+        />
+        <button
+          type="submit"
+          className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700"
+        >
+          Search
+        </button>
+      </form>
 
-        <footer className="mt-6 flex items-center justify-between text-xs text-zinc-500 dark:text-zinc-400">
-          <span>
-            {error ? `Error: ${error}` : checkedAt ? `Last check: ${checkedAt.toLocaleTimeString()}` : "…"}
-          </span>
-          <button
-            type="button"
-            onClick={() => void check()}
-            className="rounded-full border border-zinc-300 px-3 py-1 font-medium transition-colors hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800"
-          >
-            Check again
-          </button>
-        </footer>
-      </div>
+      <ErrorBanner lines={error} />
 
-      <p className="text-xs text-zinc-400 dark:text-zinc-500">
-        Polled from <code>{HEALTH_URL}</code> every {REFRESH_INTERVAL_MS / 1000}s
-      </p>
-    </main>
+      {page && page.items.length === 0 && (
+        <p className="text-sm text-zinc-500">
+          {submittedQuery ? `Nothing matches "${submittedQuery}".` : "No dishes yet - check back soon."}
+        </p>
+      )}
+
+      {page && page.items.length > 0 && (
+        <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {page.items.map((dish) => (
+            <li key={dish.id}>
+              <Card>
+                <h2 className="text-base font-semibold text-zinc-900 dark:text-zinc-50">
+                  <Link href={`/dishes/${dish.id}`} className="hover:underline">
+                    {dish.name}
+                  </Link>
+                </h2>
+                <p className="mt-0.5 text-sm text-zinc-500 dark:text-zinc-400">
+                  by{" "}
+                  <Link href={`/cooks/${dish.cook_id}`} className="text-emerald-700 hover:underline dark:text-emerald-400">
+                    {dish.cook_name ?? "an anonymous cook"}
+                  </Link>
+                </p>
+                <p className="mt-3 font-mono text-lg text-zinc-900 dark:text-zinc-100">
+                  {formatMinorUnits(dish.price)}
+                </p>
+                <p className="text-xs text-zinc-400">{dish.portions} portions</p>
+                {dish.dietary_tags.length > 0 && (
+                  <div className="mt-3 flex flex-wrap gap-1.5">
+                    {dish.dietary_tags.map((tag) => (
+                      <Tag key={tag}>{tag}</Tag>
+                    ))}
+                  </div>
+                )}
+                {dish.allergens.length > 0 && (
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {dish.allergens.map((allergen) => (
+                      <AllergenTag key={allergen}>{allergen}</AllergenTag>
+                    ))}
+                  </div>
+                )}
+              </Card>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {page && page.total > PAGE_SIZE && (
+        <Pager total={page.total} limit={PAGE_SIZE} offset={offset} onMove={setOffset} />
+      )}
+    </div>
   );
 }

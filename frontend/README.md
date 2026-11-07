@@ -21,11 +21,26 @@ the browser; `API_ORIGIN` is server-side only, used by `next.config.ts`).
 URL `/api/health` - same shape in every environment. `.env` is git-ignored;
 `.env.example` is the committed template.
 
-## What it shows
+## Pages
 
-The health dashboard polls `GET /api/health` every 5 seconds: status pill
-(**ok** when healthy), database state, SQLite journal mode and foreign-key
-enforcement, backend version and environment.
+| Route            | What it does                                                        |
+| ---------------- | ------------------------------------------------------------------- |
+| `/`              | Public dish list: `?q` name search + paged `GET /api/dishes` (active dishes only) |
+| `/dishes/{id}`   | Dish detail (404 for deactivated/unknown), link to its cook          |
+| `/cooks`         | Public cook directory (`GET /api/cooks`)                             |
+| `/cooks/{id}`    | Cook profile page + their current menu (`?cook_id=` filter)          |
+| `/login`, `/register` | Cookie-auth sessions against `/api/auth/*`                      |
+| `/dashboard`     | Signed-in: profile form, become-a-cook, and my-dishes CRUD (create/edit/deactivate/reactivate/delete) |
+| `/health`        | The original status probe: polls `GET /api/health` every 5s - status pill, database state, SQLite pragmas, version |
+
+Everything fetches relative `/api/*` URLs (rewritten to `API_ORIGIN` in dev
+and standalone, proxied by nginx in production). Prices are shown in major
+units and stored as integer minor units; the dashboard form does the
+conversion. The allergen checkbox list mirrors the backend enum
+(`src/lib/allergens.ts` ↔ `backend/app/api/dishes/models.py`).
+
+Try it with seeded data: `cd ../backend && uv run python scripts/seed.py`
+prints `@example.com` credentials you can log in with.
 
 ## Build for hosting
 
