@@ -4,12 +4,16 @@ Two independent apps that each run as their own process:
 
 - **Backend** — FastAPI + SQLAlchemy 2 (async) on **SQLite with WAL mode and
   foreign keys enabled**, schema managed by **Alembic**. Cookie auth with
-  **roles (customer/cook)**, editable profiles and cook endpoints. API v1 lives
-  in `backend/app/api/v1/` and is a work in progress. See `backend/README.md`.
+  **roles (customer/cook)**, editable profiles, cook endpoints, and cook-owned
+  dishes (fixed allergen enum, minor-unit prices, public active-dish menu).
+  API v1 lives in `backend/app/api/v1/` and is a work in progress. See
+  `backend/README.md`.
 - **Frontend** — React (Next.js 16), built in **`standalone` mode**: a
   self-contained Node server (`frontend/.next/standalone/`) you run directly,
-  under **pm2**, or behind an **nginx** reverse proxy on a VPS. It shows the
-  health of `GET /api/health`. See `frontend/README.md`.
+  under **pm2**, or behind an **nginx** reverse proxy on a VPS. Public dish
+  list with search, dish and cook pages, login/register, and a cook dashboard
+  for profile + dish management; the old status probe lives on at `/health`.
+  See `frontend/README.md`.
 
 ## Prerequisites
 
@@ -31,7 +35,7 @@ cp frontend/.env.example frontend/.env       # API_ORIGIN for the /api proxy
 
 Real environment variables (tests, pm2, Docker) always override `.env`.
 
-## Development (two terminals)
+## Development (two terminals + a seed run)
 
 ```bash
 # terminal 1 - API on http://127.0.0.1:8000 (migrates on start)
@@ -43,19 +47,25 @@ uv run python -m app.main
 cd frontend
 npm install
 npm run dev
+
+# once - demo data (10 cooks / 40 dishes / 5 customers, prints credentials)
+cd backend
+uv run python scripts/seed.py
 ```
 
-Open <http://localhost:3000/> — the status pill should read **ok**. The dev
-server rewrites `/api/:path*` to `API_ORIGIN` (from `frontend/.env`, default
-`http://127.0.0.1:8000`), so the UI fetches relative URLs and the code is
-identical in production.
+Open <http://localhost:3000/> — the public dish list, served live from the
+backend. The seed output lists `@example.com` logins; use one to reach the
+dashboard (`/dashboard`) and, as a cook, add a dish and see it in the public
+menu. The dev server rewrites `/api/:path*` to `API_ORIGIN` (from
+`frontend/.env`, default `http://127.0.0.1:8000`), so the UI fetches relative
+URLs and the code is identical in production. Health probe: `/health`.
 
 ## Tests / quality (backend)
 
 ```bash
 cd backend
-uv run pytest            # 50 tests: health, auth, roles/cooks, profiles, pragmas, migrations, API surface
-uv run ruff check app tests migrations
+uv run pytest            # 85 tests: health, auth, roles/cooks, profiles, dishes, public menu, seed, pragmas, migrations, API surface
+uv run ruff check app tests migrations scripts
 uv run mypy app
 ```
 
@@ -169,6 +179,13 @@ Frontend-side variables (Next.js):
 | POST   | `/api/cooks`       | Become a cook: creates cook profile (headline ≤80, specialty tags), adds `cook` role |
 | GET    | `/api/cooks/me`    | My cook profile - **403 for non-cooks**                  |
 | PATCH  | `/api/cooks/me`    | Update cook headline/specialties - **403 for non-cooks** |
+| GET    | `/api/cooks`       | Public cook directory (paginated), no auth               |
+| GET    | `/api/cooks/{user_id}` | Public cook profile page (404 without a cook profile) |
+| POST   | `/api/me/dishes`   | Add dish (cook only; price > 0 minor units; allergens from a fixed enum) |
+| GET    | `/api/me/dishes`   | My dashboard list - own dishes incl. deactivated         |
+| GET/PATCH/DELETE | `/api/me/dishes/{id}` | Manage own dish - another cook gets **404**    |
+| GET    | `/api/dishes`      | Public menu - **active dishes only**; `?q=` name search (LIKE), `cook_id` filter, `limit`/`offset` paging |
+| GET    | `/api/dishes/{id}` | One active dish + cook name; deactivated -> **404**      |
 | GET    | `/api/v1`          | v1 marker (`{"version": "v1", ...}`)                     |
 | GET    | `/`                | Backend service metadata (JSON) - the UI is served by the frontend process |
 | GET    | `/docs`            | OpenAPI playground (disabled when `ENVIRONMENT=production`) |
@@ -179,7 +196,17 @@ always return the same generic 401 (no account-existence leak); sessions are
 stored as SHA-256 token hashes in the `sessions` table, so a DB leak cannot
 replay logins. Roles are additive (`customer`, `cook`, or both) and enforced by
 the `require_login` / `require_cook` dependencies - 401 always outranks 403 so
-anonymous callers learn nothing about cook endpoints.
+anonymous callers learn nothing about cook endpoints. Dishes are cook-owned
+CRUD (`/api/me/dishes`): a foreign cook's dish id answers 404 (never reveals
+existence), prices are positive integer minor units (also CHECK-enforced in
+SQLite), allergens must come from the fixed `Allergen` enum, and deactivated
+dishes are hidden from the public `/api/dishes` menu (and its detail route)
+while owners still see them on the dashboard to reactivate. The public menu
+supports a case-insensitive `?q=` name search (`%`/`_` are escaped, so typed
+wildcards are literal) plus `limit`/`offset` pagination returning the match
+`total`. Seed `scripts/seed.py` with 10 cooks, 40 dishes and 5 customers is
+idempotent: accounts are reused (passwords regenerated and printed), dishes
+keyed on (cook, name) are never overwritten.
 
 ## Layout
 
@@ -197,7 +224,8 @@ backend/
     api/
       health.py               # GET /api/health (intentionally NOT versioned)
       auth/                   # accounts, roles, profiles: scrypt hashing + sessions
-      cooks/                  # become-a-cook action + cook-only endpoints
+      cooks/                  # become-a-cook, cook-only endpoints, public cook pages
+      dishes/                 # cook-owned dish CRUD + public active-dish menu
       router.py               # mounts everything under /api
       deps.py                 # shared FastAPI dependencies (DB session)
       v1/                     # API version 1 - under development
@@ -205,12 +233,14 @@ backend/
     shared/                   # declarative Base, mixins, schema helpers
     main.py                   # app factory + single-process API entry point
   migrations/                 # Alembic (env.py reads DATABASE_URL from settings)
+  scripts/seed.py             # idempotent demo data; prints fresh credentials
   tests/                      # per-test temp SQLite DB migrated by Alembic
   README.md
 frontend/
   .env                        # local config (git-ignored, never pushed)
   .env.example                # documented template - committed
-  src/app/                    # Next.js App Router (health dashboard page)
+  src/app/                    # Next.js App Router: dish directory, cook pages,
+                              # login/register, dashboard, /health probe
   next.config.ts              # output: "standalone" + /api rewrite
   .next/standalone/           # `npm run build` self-host server (git-ignored)
   README.md

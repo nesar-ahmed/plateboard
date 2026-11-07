@@ -102,3 +102,62 @@ async def test_patch_cook_me_updates_fields(accounts) -> None:
 async def test_patch_cook_me_requires_a_field(accounts) -> None:
     await accounts.cook()
     assert (await accounts.client.patch("/api/cooks/me", json={})).status_code == 422
+
+
+# --- public cook directory & profile pages ---------------------------------------
+
+
+async def test_public_cooks_list_shows_only_profiles(client, accounts) -> None:
+    await accounts.customer("fan@example.com")  # no cook profile
+    await accounts.cook("chef-a@example.com")
+    await accounts.client.patch(
+        "/api/me/profile", json={"display_name": "Ayesha", "area": "Mirpur"}
+    )
+    await accounts.cook("chef-b@example.com")
+
+    response = await client.get("/api/cooks")  # no auth at all
+    assert response.status_code == 200
+    body = response.json()
+    assert body["total"] == 2  # the plain customer is not listed
+    assert len(body["items"]) == 2
+    card = next(item for item in body["items"] if item["display_name"] == "Ayesha")
+    assert card["headline"] == COOK_BODY["headline"]
+    assert card["specialties"] == COOK_BODY["specialties"]
+    assert card["area"] == "Mirpur"
+
+
+async def test_public_cooks_pagination(client, accounts) -> None:
+    for i in range(3):
+        await accounts.cook(f"chef{i}@example.com")
+    page = (await client.get("/api/cooks", params={"limit": 2})).json()
+    assert page["total"] == 3 and len(page["items"]) == 2
+    rest = (await client.get("/api/cooks", params={"limit": 2, "offset": 2})).json()
+    assert len(rest["items"]) == 1
+    assert {i["user_id"] for i in page["items"]} != {i["user_id"] for i in rest["items"]}
+    assert (await client.get("/api/cooks", params={"limit": 0})).status_code == 422
+
+
+async def test_public_cook_profile_page(client, accounts) -> None:
+    await accounts.cook("chef-a@example.com")
+    me = (await accounts.client.get("/api/me")).json()
+    await accounts.client.patch(
+        "/api/me/profile", json={"display_name": "Ayesha", "bio": "Biryani first."}
+    )
+
+    response = await client.get(f"/api/cooks/{me['id']}")  # public: no cookies
+    assert response.status_code == 200
+    body = response.json()
+    assert body["user_id"] == me["id"]
+    assert body["display_name"] == "Ayesha"
+    assert body["bio"] == "Biryani first."
+    assert body["headline"] == COOK_BODY["headline"]
+
+    missing = await client.get("/api/cooks/33333333-3333-3333-3333-333333333333")
+    assert missing.status_code == 404
+    assert missing.json()["error"]["code"] == "not_found"
+
+
+async def test_private_me_route_not_shadowed_by_id_route(accounts) -> None:
+    """/api/cooks/me must keep resolving to the cook's own profile."""
+    await accounts.customer("fan@example.com")
+    assert (await accounts.client.get("/api/cooks/me")).status_code == 403

@@ -96,3 +96,25 @@ class CookOut(BaseModel):
     specialties: list[str]
     created_at: UTCDateTime
     updated_at: UTCDateTime
+
+
+class CookPublicOut(BaseModel):
+    """Public cook-profile card: profile fields merged with the account's
+    editable identity fields (display name, bio, free-text area)."""
+
+    user_id: uuid.UUID
+    display_name: str | None
+    bio: str | None
+    area: str | None
+    headline: str
+    specialties: list[str]
+    created_at: UTCDateTime
+
+
+class CookPage(BaseModel):
+    """``GET /api/cooks`` envelope (same pagination contract as dishes)."""
+
+    items: list[CookPublicOut]
+    total: int
+    limit: int
+    offset: int

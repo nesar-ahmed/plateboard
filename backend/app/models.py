@@ -6,6 +6,7 @@ import here - nothing else needs to know the model list.
 """
 
 from app.api.auth.models import CookProfile, User, UserSession
+from app.api.dishes.models import Dish
 from app.shared.base import Base
 
-__all__ = ["Base", "CookProfile", "User", "UserSession"]
+__all__ = ["Base", "CookProfile", "Dish", "User", "UserSession"]

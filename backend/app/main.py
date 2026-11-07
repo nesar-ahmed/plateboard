@@ -37,6 +37,11 @@ OPENAPI_TAGS = [
     {"name": "system", "description": "Health probes and service metadata."},
     {"name": "auth", "description": "Accounts, roles and server-side sessions."},
     {"name": "cooks", "description": "Cook profiles (role: cook)."},
+    {
+        "name": "dishes",
+        "description": "Menu dishes: cook-only management (/api/me/dishes) "
+        "and the public active-dish menu (/api/dishes).",
+    },
     {"name": "v1", "description": "API version 1 - under development."},
 ]
 

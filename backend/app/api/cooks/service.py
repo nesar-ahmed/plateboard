@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import uuid
 
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.auth.models import ROLE_COOK, CookProfile, User
 from app.api.cooks.schemas import CookCreateRequest, CookPatchRequest
-from app.core.exceptions import AppError
+from app.core.exceptions import AppError, NotFoundError
 
 
 class AlreadyCookError(AppError):
@@ -71,3 +72,48 @@ async def update_cook(
     await session.commit()
     await session.refresh(profile)
     return profile
+
+
+class CookProfileNotFoundError(NotFoundError):
+    default_message = "Cook profile not found"
+
+
+async def page_cooks(
+    session: AsyncSession, *, limit: int = 20, offset: int = 0
+) -> tuple[int, list[tuple[CookProfile, User]]]:
+    """Public directory: every cook profile with its account, newest first.
+
+    ``total`` covers all profiles so the UI can paginate; rows carry the
+    ``User`` so the router can render display_name/bio/area without extra
+    queries. Only accounts that completed the become-a-cook action appear -
+    the role list alone is not enough to have a public page.
+    """
+    total = (
+        await session.scalar(select(func.count()).select_from(CookProfile))
+    ) or 0
+    stmt = (
+        select(CookProfile, User)
+        .join(User, User.id == CookProfile.user_id)
+        .order_by(
+            CookProfile.created_at.desc(),
+            # tie-breaker so paging within the same second is deterministic
+            CookProfile.user_id,
+        )
+        .limit(limit)
+        .offset(offset)
+    )
+    return total, [(profile, user) for profile, user in (await session.execute(stmt)).all()]
+
+
+async def get_public_cook(
+    session: AsyncSession, user_id: uuid.UUID
+) -> tuple[CookProfile, User]:
+    stmt = (
+        select(CookProfile, User)
+        .join(User, User.id == CookProfile.user_id)
+        .where(CookProfile.user_id == user_id)
+    )
+    row = (await session.execute(stmt)).one_or_none()
+    if row is None:
+        raise CookProfileNotFoundError
+    return row[0], row[1]
