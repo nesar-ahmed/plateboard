@@ -17,17 +17,21 @@ import {
 import {
   api,
   ApiError,
+  type CookProfile,
   type Dish,
   type DishInput,
   type User,
+  type Zone,
 } from "@/lib/api";
 import { formatMinorUnits, splitList } from "@/lib/format";
+import { useZones } from "@/lib/use-zones";
 
 /**
  * Signed-in dashboard (client-side gate: any 401 from /api/me bounces to
- * /login). Sections: profile editing, the become-a-cook action, and full
- * management of the cook's own dishes - create, edit, deactivate/reactivate,
- * delete. Prices shown in major units, entered there, stored as minor units.
+ * /login). Sections: profile editing, the become-a-cook action, the cook
+ * profile (headline, specialties, kitchen zone), and full management of the
+ * cook's own dishes - create, edit, deactivate/reactivate, delete. Prices
+ * shown in major units, entered there, stored as minor units.
  */
 export default function DashboardPage() {
   const router = useRouter();
@@ -74,6 +78,8 @@ export default function DashboardPage() {
       <ProfileCard me={me} onSaved={setMe} />
 
       {!isCook && <BecomeCookCard onDone={loadMe} />}
+
+      {isCook && <CookProfileCard />}
 
       {isCook && <MyDishes />}
     </div>
@@ -144,9 +150,41 @@ function ProfileCard({ me, onSaved }: { me: User; onSaved: (user: User) => void 
   );
 }
 
+/** Zone picker shared by the become-a-cook and cook-profile forms. */
+function ZoneSelect({
+  zones,
+  value,
+  onChange,
+}: {
+  zones: Zone[] | null;
+  value: string;
+  onChange: (slug: string) => void;
+}) {
+  return (
+    <select
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+      disabled={!zones}
+      aria-label="Kitchen zone"
+      className={inputClass}
+    >
+      <option value="">No zone yet</option>
+      {(zones ?? []).map((zone) => (
+        <option key={zone.slug} value={zone.slug}>
+          {zone.name} (grid {zone.x}, {zone.y})
+        </option>
+      ))}
+    </select>
+  );
+}
+
+const ZONE_HINT = "Where your kitchen is; customers filter dishes by zone and distance.";
+
 function BecomeCookCard({ onDone }: { onDone: () => Promise<void> }) {
+  const { zones } = useZones();
   const [headline, setHeadline] = useState("");
   const [specialties, setSpecialties] = useState("");
+  const [zone, setZone] = useState("");
   const [busy, setBusy] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
 
@@ -158,6 +196,7 @@ function BecomeCookCard({ onDone }: { onDone: () => Promise<void> }) {
       await api.post("/cooks", {
         headline: headline.trim(),
         specialties: splitList(specialties),
+        ...(zone ? { zone } : {}),
       });
       await onDone(); // role flips -> dashboard re-renders with dish tools
     } catch (cause) {
@@ -192,11 +231,136 @@ function BecomeCookCard({ onDone }: { onDone: () => Promise<void> }) {
             className={inputClass}
           />
         </Field>
+        <Field label="Kitchen zone" hint={ZONE_HINT}>
+          <ZoneSelect zones={zones} value={zone} onChange={setZone} />
+        </Field>
         <button type="submit" disabled={busy} className={primaryButtonClass}>
           {busy ? "Cooking up..." : "Become a cook"}
         </button>
       </form>
     </Card>
+  );
+}
+
+/**
+ * The cook's own profile: headline, specialties and kitchen zone
+ * (GET/PATCH /api/cooks/me). Only changed fields are sent; picking
+ * "No zone yet" sends `zone: null`, which clears the placement.
+ */
+function CookProfileCard() {
+  const { zones } = useZones();
+  const [profile, setProfile] = useState<CookProfile | null>(null);
+  const [errors, setErrors] = useState<string[]>([]);
+  // Lives here, not in the form: the form remounts after every save.
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    const load = async () => {
+      try {
+        const mine = await api.get<CookProfile>("/cooks/me");
+        if (active) setProfile(mine);
+      } catch (cause) {
+        if (active) setErrors(cause instanceof ApiError ? cause.lines : ["Could not reach the API"]);
+      }
+    };
+    void load();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  return (
+    <Card title="Cook profile">
+      <ErrorBanner lines={errors} />
+      {profile ? (
+        // Remount on save so the form restarts from the server's answer.
+        <CookProfileForm
+          key={profile.updated_at}
+          profile={profile}
+          zones={zones}
+          saved={saved}
+          onSubmitStart={() => setSaved(false)}
+          onSaved={(next) => {
+            setProfile(next);
+            setSaved(true);
+          }}
+        />
+      ) : (
+        errors.length === 0 && <p className="text-sm text-zinc-500">Loading...</p>
+      )}
+    </Card>
+  );
+}
+
+function CookProfileForm({
+  profile,
+  zones,
+  saved,
+  onSubmitStart,
+  onSaved,
+}: {
+  profile: CookProfile;
+  zones: Zone[] | null;
+  saved: boolean;
+  onSubmitStart: () => void;
+  onSaved: (profile: CookProfile) => void;
+}) {
+  const [headline, setHeadline] = useState(profile.headline);
+  const [specialties, setSpecialties] = useState(profile.specialties.join(", "));
+  const [zone, setZone] = useState(profile.zone?.slug ?? "");
+  const [busy, setBusy] = useState(false);
+  const [errors, setErrors] = useState<string[]>([]);
+
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setErrors([]);
+    onSubmitStart();
+    const patch: Record<string, unknown> = {};
+    if (headline.trim() !== profile.headline) patch.headline = headline.trim();
+    const tags = splitList(specialties).map((tag) => tag.toLowerCase());
+    if (tags.join("\n") !== profile.specialties.join("\n")) patch.specialties = tags;
+    if (zone !== (profile.zone?.slug ?? "")) patch.zone = zone || null;
+    if (Object.keys(patch).length === 0) {
+      setErrors(["nothing to save - no field changed"]);
+      return;
+    }
+    setBusy(true);
+    try {
+      onSaved(await api.patch<CookProfile>("/cooks/me", patch));
+    } catch (cause) {
+      setErrors(cause instanceof ApiError ? cause.lines : ["Could not reach the API"]);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <form onSubmit={submit} className="space-y-4">
+      <ErrorBanner lines={errors} />
+      {saved && <p className="text-sm text-emerald-700 dark:text-emerald-400">Cook profile saved.</p>}
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Field label="Headline">
+          <input
+            value={headline}
+            onChange={(e) => setHeadline(e.target.value)}
+            required
+            minLength={3}
+            maxLength={80}
+            className={inputClass}
+          />
+        </Field>
+        <Field label="Specialties" hint="Comma separated, lowercase tags.">
+          <input value={specialties} onChange={(e) => setSpecialties(e.target.value)} className={inputClass} />
+        </Field>
+      </div>
+      <Field label="Kitchen zone" hint={ZONE_HINT}>
+        <ZoneSelect zones={zones} value={zone} onChange={setZone} />
+      </Field>
+      <button type="submit" disabled={busy} className={primaryButtonClass}>
+        {busy ? "Saving..." : "Save cook profile"}
+      </button>
+    </form>
   );
 }
 

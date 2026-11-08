@@ -7,7 +7,10 @@ it in-process via ``seed()`` rather than as a subprocess.
 
 from __future__ import annotations
 
-from scripts.seed import COOKS, CUSTOMERS, seed
+from types import SimpleNamespace
+
+from app.modules.zones.grid import grid_distance
+from scripts.seed import COOKS, CUSTOMERS, ZONES, seed
 
 TOTAL_DISHES = sum(len(cook.dishes) for cook in COOKS)
 INACTIVE_DISHES = sum(1 for cook in COOKS for dish in cook.dishes if not dish.active)
@@ -96,3 +99,60 @@ async def test_rerun_keeps_dashboard_edits(client) -> None:
     again = (await client.get("/api/me/dishes")).json()
     deactivated = next(dish for dish in again if dish["id"] == target)
     assert deactivated["active"] is False
+
+
+# --- zones ------------------------------------------------------------------------
+
+
+async def test_seed_creates_the_zone_grid_and_places_every_cook(client) -> None:
+    result = await seed()
+    assert result.zones_created == len(ZONES) == 9
+
+    zones = (await client.get("/api/zones")).json()
+    assert [(z["slug"], z["x"], z["y"]) for z in zones] == [
+        (slug, x, y) for slug, _name, x, y in ZONES
+    ]
+
+    cooks = (await client.get("/api/cooks?limit=100")).json()["items"]
+    assert len(cooks) == len(COOKS)
+    placed = {cook["display_name"]: cook["zone"]["slug"] for cook in cooks}
+    assert placed == {spec.name: spec.zone for spec in COOKS}
+
+
+async def test_seeded_menu_answers_zone_and_distance_queries(client) -> None:
+    await seed()
+    zone_of = {spec.name: spec.zone for spec in COOKS}
+    cells = {slug: SimpleNamespace(x=x, y=y) for slug, _name, x, y in ZONES}
+
+    same_zone = (await client.get("/api/dishes?zone=market-square&limit=100")).json()
+    assert same_zone["total"] > 0
+    assert {d["cook_name"] for d in same_zone["items"]} == {
+        name for name, slug in zone_of.items() if slug == "market-square"
+    }
+
+    near = (
+        await client.get("/api/dishes?zone=north-gate&max_distance=1&limit=100")
+    ).json()
+    assert near["total"] > 0
+    for dish in near["items"]:
+        kitchen = cells[zone_of[dish["cook_name"]]]
+        assert dish["distance"] == grid_distance(cells["north-gate"], kitchen) <= 1
+
+
+async def test_rerun_keeps_zones_and_a_cooks_own_zone_choice(client) -> None:
+    first = await seed()
+    cook = next(account for account in first.accounts if account.kind == "cook")
+    await client.post(
+        "/api/auth/login", json={"email": cook.email, "password": cook.password}
+    )
+    moved = await client.patch("/api/cooks/me", json={"zone": "harbour"})
+    assert moved.status_code == 200
+
+    second = await seed()
+    assert second.zones_created == 0
+    assert second.zones_existing == len(ZONES)
+    same = next(account for account in second.accounts if account.email == cook.email)
+    await client.post(
+        "/api/auth/login", json={"email": same.email, "password": same.password}
+    )
+    assert (await client.get("/api/cooks/me")).json()["zone"]["slug"] == "harbour"

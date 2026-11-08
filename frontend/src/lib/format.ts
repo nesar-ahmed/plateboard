@@ -40,3 +40,29 @@ export function splitList(input: string): string[] {
 export function joinListOrDash(items: string[]): string {
   return items.length > 0 ? items.join(", ") : "—";
 }
+
+/**
+ * Optional price filter input -> minor units: blank -> null, "4.5" -> 450.
+ * Unlike parsePriceToMinorUnits, zero is allowed (a lower bound of 0 is
+ * meaningful); negative or non-numeric input throws a field-style message.
+ */
+export function parseOptionalPriceToMinorUnits(input: string): number | null {
+  const trimmed = input.trim();
+  if (trimmed === "") return null;
+  const value = Number(trimmed);
+  if (!Number.isFinite(value) || value < 0) {
+    throw new Error("prices must be numbers of 0 or more, e.g. 8.90");
+  }
+  return Math.round(value * 100);
+}
+
+/** Minor units -> editable input text (890 -> "8.90"); null -> "". */
+export function minorUnitsToInput(minor: number | null): string {
+  return minor === null ? "" : (minor / 100).toFixed(2);
+}
+
+/** Grid distance for people: 0 -> "in this zone", 1 -> "1 step away". */
+export function formatDistance(steps: number): string {
+  if (steps === 0) return "in this zone";
+  return `${steps} ${steps === 1 ? "step" : "steps"} away`;
+}

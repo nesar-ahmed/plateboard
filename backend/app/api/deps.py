@@ -1,7 +1,7 @@
 """Dependencies shared by every module.
 
-Module-specific dependencies belong to the module itself
-(``app/modules/<name>/dependencies.py``); this file only holds what is
+Feature-specific dependencies belong to the feature itself
+(e.g. ``app/modules/auth/dependencies.py``); this file only holds what is
 genuinely global, and is the seam tests override.
 """
 
@@ -39,7 +39,7 @@ async def get_db_session() -> AsyncIterator[AsyncSession]:
 
 
 DbSession = Annotated[AsyncSession, Depends(get_db_session)]
-"""Shorthand used by every module's ``dependencies.py``.
+"""Shorthand used by every feature's routes and ``dependencies.py``.
 
 A type alias rather than ``session: AsyncSession = Depends(...)`` so the
 session type stays visible to mypy and to route signatures.

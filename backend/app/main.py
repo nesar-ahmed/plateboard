@@ -28,6 +28,7 @@ from app import __version__
 from app.api.router import api_router
 from app.core.config import BACKEND_ROOT, Settings, get_settings
 from app.core.db import dispose_engine, get_engine
+from app.core.docs import register_self_hosted_docs
 from app.core.exceptions import register_exception_handlers
 from app.core.logging import configure_logging
 
@@ -41,6 +42,14 @@ OPENAPI_TAGS = [
         "name": "dishes",
         "description": "Menu dishes: cook-only management (/api/me/dishes) "
         "and the public active-dish menu (/api/dishes).",
+    },
+    {
+        "name": "zones",
+        "description": "Service-grid zones (slug + x/y); distances are grid steps.",
+    },
+    {
+        "name": "cart",
+        "description": "The signed-in user's cart: dishes and quantities (/api/me/cart).",
     },
     {"name": "v1", "description": "API version 1 - under development."},
 ]
@@ -111,6 +120,10 @@ def register_service_root(app: FastAPI, settings: Settings) -> None:
 def create_app(settings: Settings | None = None) -> FastAPI:
     """Build the application. Tests call this with their own ``Settings``."""
     settings = settings or get_settings()
+    # Self-hosted docs assets (DOCS_ASSETS_DIR) replace FastAPI's CDN-based
+    # /docs + /redoc pages; without the setting FastAPI's defaults are used.
+    docs_assets = settings.docs_assets_path if settings.docs_enabled else None
+    cdn_docs = settings.docs_enabled and docs_assets is None
 
     app = FastAPI(
         title=settings.APP_NAME,
@@ -120,8 +133,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         lifespan=lifespan,
         openapi_tags=OPENAPI_TAGS,
         # Interactive docs are handy in development, an attack surface in production.
-        docs_url="/docs" if settings.docs_enabled else None,
-        redoc_url="/redoc" if settings.docs_enabled else None,
+        docs_url="/docs" if cdn_docs else None,
+        redoc_url="/redoc" if cdn_docs else None,
         openapi_url=f"{settings.API_V1_PREFIX}/openapi.json"
         if settings.docs_enabled
         else None,
@@ -143,6 +156,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.middleware("http")(add_process_time_header)
 
     app.include_router(api_router)
+    if docs_assets is not None:
+        register_self_hosted_docs(app, docs_assets)
     register_service_root(app, settings)
     return app
 

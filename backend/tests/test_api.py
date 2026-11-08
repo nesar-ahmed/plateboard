@@ -45,5 +45,9 @@ async def test_openapi_documents_the_api_surface(client) -> None:
         "/api/me/dishes/{dish_id}",
         "/api/dishes",
         "/api/dishes/{dish_id}",
+        "/api/zones",
+        "/api/cart",
+        "/api/cart/items",
+        "/api/cart/items/{dish_id}",
     } <= set(paths)
     assert "/api/v1/dishes" not in paths  # public menu moved to /api/dishes

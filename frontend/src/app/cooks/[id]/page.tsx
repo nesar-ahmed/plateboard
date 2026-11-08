@@ -4,9 +4,9 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 
-import { AllergenTag, Card, ErrorBanner, Tag } from "@/components/ui";
+import DishCard from "@/components/dish-card";
+import { Card, ErrorBanner, Tag } from "@/components/ui";
 import { api, ApiError, type CookPublic, type Dish, type DishPage } from "@/lib/api";
-import { formatMinorUnits } from "@/lib/format";
 
 /**
  * Public cook profile: GET /api/cooks/{id} for the person, then
@@ -70,6 +70,14 @@ export default function CookProfilePage() {
         )}
         <div className="mt-4 flex flex-wrap items-center gap-3 text-sm text-zinc-500 dark:text-zinc-400">
           {cook.area && <span>{cook.area}</span>}
+          {cook.zone && (
+            <Link
+              href={`/?zone=${encodeURIComponent(cook.zone.slug)}`}
+              className="text-emerald-700 hover:underline dark:text-emerald-400"
+            >
+              Zone: {cook.zone.name}
+            </Link>
+          )}
           {cook.specialties.map((specialty) => (
             <Tag key={specialty}>{specialty}</Tag>
           ))}
@@ -86,24 +94,7 @@ export default function CookProfilePage() {
         <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {dishes.map((dish) => (
             <li key={dish.id}>
-              <Card>
-                <h3 className="text-base font-semibold text-zinc-900 dark:text-zinc-50">
-                  <Link href={`/dishes/${dish.id}`} className="hover:underline">
-                    {dish.name}
-                  </Link>
-                </h3>
-                <p className="mt-3 font-mono text-lg text-zinc-900 dark:text-zinc-100">
-                  {formatMinorUnits(dish.price)}
-                </p>
-                <p className="text-xs text-zinc-400">{dish.portions} portions</p>
-                {dish.allergens.length > 0 && (
-                  <div className="mt-3 flex flex-wrap gap-1.5">
-                    {dish.allergens.map((allergen) => (
-                      <AllergenTag key={allergen}>{allergen}</AllergenTag>
-                    ))}
-                  </div>
-                )}
-              </Card>
+              <DishCard dish={dish} showCook={false} />
             </li>
           ))}
         </ul>

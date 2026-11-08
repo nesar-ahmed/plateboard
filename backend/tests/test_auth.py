@@ -13,9 +13,9 @@ from __future__ import annotations
 import pytest
 from sqlalchemy import select
 
-from app.api.auth.models import User
-from app.api.auth.security import verify_password
 from app.core.db import get_sessionmaker
+from app.modules.auth.models import User
+from app.modules.auth.security import verify_password
 
 PASSWORD = "super-secret-passphrase"
 

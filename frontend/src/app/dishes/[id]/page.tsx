@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 
+import { AddToCartWithQuantity } from "@/components/add-to-cart";
 import { AllergenTag, Card, ErrorBanner, Tag } from "@/components/ui";
 import { api, ApiError, type Dish } from "@/lib/api";
 import { formatMinorUnits, joinListOrDash } from "@/lib/format";
@@ -79,6 +80,10 @@ export default function DishDetailPage() {
           </div>
         </div>
 
+        <div className="mt-6">
+          <AddToCartWithQuantity dish={dish} />
+        </div>
+
         <dl className="mt-6 space-y-3 text-sm">
           <div>
             <dt className="font-medium text-zinc-500 dark:text-zinc-400">Ingredients</dt>
@@ -91,6 +96,27 @@ export default function DishDetailPage() {
                 <span className="text-zinc-400">None declared</span>
               ) : (
                 dish.allergens.map((allergen) => <AllergenTag key={allergen}>{allergen}</AllergenTag>)
+              )}
+            </dd>
+          </div>
+          <div>
+            <dt className="font-medium text-zinc-500 dark:text-zinc-400">Kitchen zone</dt>
+            <dd className="mt-0.5 text-zinc-800 dark:text-zinc-200">
+              {dish.zone ? (
+                <>
+                  {dish.zone.name}{" "}
+                  <span className="text-zinc-400">
+                    (grid {dish.zone.x}, {dish.zone.y})
+                  </span>{" "}
+                  <Link
+                    href={`/?zone=${encodeURIComponent(dish.zone.slug)}&max_distance=1`}
+                    className="text-emerald-700 hover:underline dark:text-emerald-400"
+                  >
+                    More dishes near {dish.zone.name}
+                  </Link>
+                </>
+              ) : (
+                <span className="text-zinc-400">Not set</span>
               )}
             </dd>
           </div>

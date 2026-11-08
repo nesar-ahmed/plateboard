@@ -1,18 +1,32 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Suspense, useState } from "react";
 
 import { Card, ErrorBanner, Field, inputClass, primaryButtonClass } from "@/components/ui";
 import { api, ApiError, type User } from "@/lib/api";
+import { safeNextPath, useSession } from "@/lib/session";
+
+/** `useSearchParams` (the `?next=` target) needs a Suspense boundary. */
+export default function RegisterPage() {
+  return (
+    <Suspense fallback={null}>
+      <RegisterForm />
+    </Suspense>
+  );
+}
 
 /**
  * POST /api/auth/register then POST /api/auth/login (registration returns no
- * session on its own), landing on the dashboard as a fresh customer.
+ * session on its own). The login moves a guest cart to the new account, so
+ * "register at checkout" keeps the dishes; then `?next=` or the dashboard.
  */
-export default function RegisterPage() {
+function RegisterForm() {
   const router = useRouter();
+  const params = useSearchParams();
+  const next = safeNextPath(params.get("next"));
+  const { refresh } = useSession();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [repeat, setRepeat] = useState("");
@@ -30,7 +44,8 @@ export default function RegisterPage() {
     try {
       await api.post<User>("/auth/register", { email, password });
       await api.post<User>("/auth/login", { email, password });
-      router.push("/dashboard");
+      await refresh();
+      router.push(next);
     } catch (cause) {
       setErrors(cause instanceof ApiError ? cause.lines : ["Could not reach the API"]);
     } finally {
@@ -79,7 +94,10 @@ export default function RegisterPage() {
           </button>
           <p className="text-sm text-zinc-500 dark:text-zinc-400">
             Already registered?{" "}
-            <Link href="/login" className="text-emerald-700 hover:underline dark:text-emerald-400">
+            <Link
+              href={next === "/dashboard" ? "/login" : `/login?next=${encodeURIComponent(next)}`}
+              className="text-emerald-700 hover:underline dark:text-emerald-400"
+            >
               Log in
             </Link>
           </p>

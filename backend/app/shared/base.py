@@ -1,9 +1,9 @@
 """Shared kernel: declarative base and column mixins used by every model.
 
-Rule of thumb for the modular layout: code in ``app/shared`` may not import
-from ``app.modules``. Domain modules may import from here freely, which keeps
-the dependency graph pointing in one direction and makes modules easy to lift
-out into services later.
+Rule of thumb for the layout: code in ``app/shared`` may not import from
+``app.api``. Feature packages (``app/api/<feature>``) may import from here
+freely, which keeps the dependency graph pointing in one direction and makes
+features easy to lift out into services later.
 """
 
 from __future__ import annotations

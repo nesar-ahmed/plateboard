@@ -68,10 +68,26 @@ class Settings(BaseSettings):
     ]
     TRUST_X_FORWARDED_HOST: bool = False
 
+    # --- API docs ---------------------------------------------------------
+    # /docs (Swagger UI) and /redoc load their JS/CSS from the jsDelivr CDN by
+    # default, so the *browser* needs internet access. Point this at a local
+    # directory holding those files to serve them from the API itself instead
+    # (air-gapped hosts, locked-down networks). Relative paths resolve against
+    # the backend root. Expected files: swagger-ui-bundle.js, swagger-ui.css
+    # (swagger-ui-dist@5) and redoc.standalone.js (redoc@2); see README.
+    DOCS_ASSETS_DIR: Path | None = None
+
     # --- sessions ---------------------------------------------------------
     # Server-side sessions (table `sessions`) carried in an HTTP-only cookie.
     SESSION_COOKIE_NAME: str = "plateboard_session"
     SESSION_TTL_DAYS: int = 7
+
+    # --- carts -----------------------------------------------------------
+    # Guests get a cart too, identified by a random token in this HTTP-only
+    # cookie (only its SHA-256 is stored). Logging in moves the guest cart to
+    # the account and clears the cookie.
+    CART_COOKIE_NAME: str = "plateboard_cart"
+    CART_TTL_DAYS: int = 30
 
     # --- observability ---------------------------------------------------
     LOG_LEVEL: Literal["CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"] = "INFO"
@@ -89,6 +105,22 @@ class Settings(BaseSettings):
                 return stripped  # let pydantic decode the JSON array
             return [item.strip() for item in stripped.split(",") if item.strip()]
         return value
+
+    @field_validator("DOCS_ASSETS_DIR", mode="before")
+    @classmethod
+    def _blank_dir_is_unset(cls, value: object) -> object:
+        """``DOCS_ASSETS_DIR=`` (empty, as in .env templates) means "use the CDN"."""
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
+
+    @property
+    def docs_assets_path(self) -> Path | None:
+        """Absolute self-hosted docs-assets directory, or ``None`` for the CDN."""
+        if self.DOCS_ASSETS_DIR is None:
+            return None
+        path = self.DOCS_ASSETS_DIR.expanduser()
+        return path if path.is_absolute() else BACKEND_ROOT / path
 
     @property
     def is_testing(self) -> bool:

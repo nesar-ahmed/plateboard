@@ -61,7 +61,11 @@ export default function CookDirectory() {
                   </Link>
                 </h2>
                 <p className="mt-0.5 text-sm text-zinc-500 dark:text-zinc-400">{cook.headline}</p>
-                {cook.area && <p className="mt-2 text-xs text-zinc-400">{cook.area}</p>}
+                {(cook.area || cook.zone) && (
+                  <p className="mt-2 text-xs text-zinc-400">
+                    {[cook.area, cook.zone && `zone: ${cook.zone.name}`].filter(Boolean).join(" · ")}
+                  </p>
+                )}
                 {cook.specialties.length > 0 && (
                   <div className="mt-3 flex flex-wrap gap-1.5">
                     {cook.specialties.map((specialty) => (

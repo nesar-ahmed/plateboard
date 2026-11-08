@@ -1,4 +1,5 @@
-"""Seed the Plateboard database with demo data: 10 cooks, 40 dishes, 5 customers.
+"""Seed the Plateboard database with demo data: 9 zones, 10 cooks, 40 dishes,
+5 customers.
 
 Run from ``backend/``::
 
@@ -16,6 +17,9 @@ What it does:
 * creates dishes missing from the seed list, keyed on ``(cook, name)`` -
   dishes that already exist are left untouched, so edits or deactivations
   made through the dashboard survive a re-run.
+* creates the demo zone grid (keyed on slug; existing zones untouched) and
+  places each seeded cook in a zone - only if the cook has no zone yet, so a
+  zone chosen through ``PATCH /api/cooks/me`` survives a re-run too.
 
 All names are invented; any resemblance to real persons is coincidental.
 """
@@ -39,11 +43,13 @@ if str(BACKEND_ROOT) not in sys.path:
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.auth.models import ROLE_COOK, ROLE_CUSTOMER, CookProfile, User
-from app.api.auth.security import hash_password
-from app.api.dishes.models import ALLERGEN_VALUES, Dish
 from app.core.db import session_scope
 from app.main import run_migrations
+from app.modules.auth.models import ROLE_COOK, ROLE_CUSTOMER, CookProfile, User
+from app.modules.auth.security import hash_password
+from app.modules.dishes.models import ALLERGEN_VALUES, Dish
+from app.modules.zones.models import Zone
+from app.modules.zones.schemas import ZoneCreate
 
 
 @dataclasses.dataclass(frozen=True)
@@ -53,7 +59,7 @@ class DishSpec:
     price: int  # minor units
     portions: int
     ingredients: tuple[str, ...] = ()
-    allergens: tuple[str, ...] = ()  # tokens from app.api.dishes.models.Allergen
+    allergens: tuple[str, ...] = ()  # tokens from app.modules.dishes.models.Allergen
     dietary_tags: tuple[str, ...] = ()
     active: bool = True
 
@@ -65,7 +71,28 @@ class CookSpec:
     area: str
     bio: str
     specialties: tuple[str, ...]
+    zone: str  # slug from ZONES: where the kitchen sits on the service grid
     dishes: tuple[DishSpec, ...]
+
+
+# The demo service grid: (slug, name, x, y), x = column, y = row. Distances
+# between zones are Manhattan grid steps (app.modules.zones.grid).
+#
+#        x=0          x=1            x=2
+#  y=0   north-gate   old-town       hillside
+#  y=1   riverside    market-square  university
+#  y=2   harbour      station        garden-district
+ZONES: tuple[tuple[str, str, int, int], ...] = (
+    ("north-gate", "North Gate", 0, 0),
+    ("old-town", "Old Town", 1, 0),
+    ("hillside", "Hillside", 2, 0),
+    ("riverside", "Riverside", 0, 1),
+    ("market-square", "Market Square", 1, 1),
+    ("university", "University", 2, 1),
+    ("harbour", "Harbour", 0, 2),
+    ("station", "Station", 1, 2),
+    ("garden-district", "Garden District", 2, 2),
+)
 
 
 # 10 cooks x 4 dishes = 40 dishes; two are deactivated on purpose so the
@@ -77,6 +104,7 @@ COOKS: tuple[CookSpec, ...] = (
         area="Dhanmondi, Dhaka",
         bio="Third-generation home cook chasing the perfect crunchy alu.",
         specialties=("biryani", "korma"),
+        zone="market-square",
         dishes=(
             DishSpec(
                 "Hyderabadi Chicken Biryani",
@@ -114,6 +142,7 @@ COOKS: tuple[CookSpec, ...] = (
         area="Quartieri Spagnoli, Napoli",
         bio="Pasta is a trade, ragù is patience.",
         specialties=("pasta", "pizza"),
+        zone="old-town",
         dishes=(
             DishSpec(
                 "Tagliatelle al Ragù",
@@ -151,6 +180,7 @@ COOKS: tuple[CookSpec, ...] = (
         area="Namba, Osaka",
         bio="Ramen first, questions later.",
         specialties=("ramen", "okonomiyaki"),
+        zone="station",
         dishes=(
             DishSpec(
                 "Tonkotsu Ramen",
@@ -189,6 +219,7 @@ COOKS: tuple[CookSpec, ...] = (
         area="Civil Lines, Jaipur",
         bio="Marwadi kitchen, no shortcuts, no eggs.",
         specialties=("vegetarian", "thali"),
+        zone="market-square",
         dishes=(
             DishSpec(
                 "Paneer Tikka Masala",
@@ -226,6 +257,7 @@ COOKS: tuple[CookSpec, ...] = (
         area="Smíchov, Praha",
         bio="Czech home cooking and honest dumplings.",
         specialties=("czech", "soups"),
+        zone="hillside",
         dishes=(
             DishSpec(
                 "Svíčková na smetaně",
@@ -263,6 +295,7 @@ COOKS: tuple[CookSpec, ...] = (
         area="Hamra, Beirut",
         bio="If the parsley isn't hand-chopped, it isn't tabbouleh.",
         specialties=("mezze", "grill"),
+        zone="riverside",
         dishes=(
             DishSpec(
                 "Chicken Shawarma Platter",
@@ -300,6 +333,7 @@ COOKS: tuple[CookSpec, ...] = (
         area="Osu, Accra",
         bio="Jollof judge in retirement; still cooking weekends.",
         specialties=("jollof", "soups"),
+        zone="harbour",
         dishes=(
             DishSpec(
                 "Jollof Rice",
@@ -337,6 +371,7 @@ COOKS: tuple[CookSpec, ...] = (
         area="Podil, Kyiv",
         bio="Dill is a food group. Sour cream is a seasoning.",
         specialties=("dumplings", "soups"),
+        zone="north-gate",
         dishes=(
             DishSpec(
                 "Borscht",
@@ -375,6 +410,7 @@ COOKS: tuple[CookSpec, ...] = (
         area="Teotitlán, Oaxaca",
         bio="Thirty ingredients in the mole, zero shortcuts.",
         specialties=("mexican", "moles"),
+        zone="university",
         dishes=(
             DishSpec(
                 "Mole Negro con Pollo",
@@ -412,6 +448,7 @@ COOKS: tuple[CookSpec, ...] = (
         area="Liwan, Guangzhou",
         bio="If the har gow has fewer than ten pleats, send it back.",
         specialties=("dim sum", "cantonese"),
+        zone="garden-district",
         dishes=(
             DishSpec(
                 "Har Gow",
@@ -469,6 +506,8 @@ class SeedAccount:
 @dataclasses.dataclass
 class SeedResult:
     accounts: list[SeedAccount] = dataclasses.field(default_factory=list)
+    zones_created: int = 0
+    zones_existing: int = 0
     users_created: int = 0
     users_existing: int = 0
     dishes_created: int = 0
@@ -532,15 +571,39 @@ async def _ensure_user(
     return user, True
 
 
+async def _ensure_zones(session: AsyncSession, result: SeedResult) -> dict[str, Zone]:
+    """Create missing demo zones (keyed on slug); return every zone by slug."""
+    existing = {zone.slug: zone for zone in (await session.scalars(select(Zone))).all()}
+    for slug, name, x, y in ZONES:
+        if slug in existing:
+            result.zones_existing += 1
+            continue
+        spec = ZoneCreate(slug=slug, name=name, x=x, y=y)  # same rules as the API
+        zone = Zone(**spec.model_dump())
+        session.add(zone)
+        existing[slug] = zone
+        result.zones_created += 1
+    await session.flush()  # ids are needed for the cook placements below
+    return existing
+
+
 async def _ensure_cook_profile(
-    session: AsyncSession, user: User, spec: CookSpec
+    session: AsyncSession, user: User, spec: CookSpec, zones: dict[str, Zone]
 ) -> None:
+    zone = zones[spec.zone]
     profile = await session.get(CookProfile, user.id)
     if profile is not None:
-        return  # leave dashboard edits alone
+        # Leave dashboard edits alone; only place cooks that have no zone yet
+        # (e.g. a database seeded before zones existed).
+        if profile.zone_id is None:
+            profile.zone = zone
+        return
     session.add(
         CookProfile(
-            user_id=user.id, headline=spec.headline, specialties=list(spec.specialties)
+            user_id=user.id,
+            headline=spec.headline,
+            specialties=list(spec.specialties),
+            zone=zone,
         )
     )
 
@@ -580,6 +643,7 @@ async def seed() -> SeedResult:
     """Run the seed inside one transaction; safe to call repeatedly."""
     result = SeedResult()
     async with session_scope() as session:
+        zones = await _ensure_zones(session, result)
         for spec in COOKS:
             email = email_for(spec.name)
             secret = generate_password()
@@ -594,7 +658,7 @@ async def seed() -> SeedResult:
             )
             result.users_created += created
             result.users_existing += not created
-            await _ensure_cook_profile(session, user, spec)
+            await _ensure_cook_profile(session, user, spec, zones)
             for dish_spec in spec.dishes:
                 if await _ensure_dish(session, user.id, dish_spec):
                     result.dishes_created += 1
@@ -624,6 +688,7 @@ async def seed() -> SeedResult:
 
 def report(result: SeedResult, database: str) -> None:
     print(f"Plateboard seed - database: {database}")
+    print(f"zones:   {result.zones_created} created, {result.zones_existing} kept")
     print(f"users:   {result.users_created} created, {result.users_existing} reused")
     print(f"dishes:  {result.dishes_created} created, {result.dishes_existing} kept")
     print()

@@ -19,7 +19,7 @@ import uuid as uuidlib
 
 import pytest
 
-from app.api.dishes.models import ALLERGEN_VALUES
+from app.modules.dishes.models import ALLERGEN_VALUES
 
 DISH_BODY = {
     "name": "Hyderabadi chicken biryani",
@@ -366,7 +366,11 @@ async def test_deactivated_dish_disappears_from_public_menu(accounts) -> None:
 async def test_public_search_is_case_insensitive_substring(accounts) -> None:
     await accounts.cook()
     biryani = await create_dish(accounts, name="Hyderabadi Biryani Supreme")
-    await create_dish(accounts, name="Kerala Payasam")
+    # Own description: search also reads descriptions (tests/test_dish_search.py),
+    # and DISH_BODY's mentions biryani.
+    await create_dish(
+        accounts, name="Kerala Payasam", description="Rice pudding with cardamom."
+    )
 
     response = await accounts.client.get("/api/dishes", params={"q": "bIrYaNi"})
     assert response.status_code == 200

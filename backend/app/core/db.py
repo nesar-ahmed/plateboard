@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import (
 from sqlalchemy.pool import StaticPool
 
 from app.core.config import get_settings
+from app.shared.text import FOLD_SQL_FUNCTION, fold_text
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +43,8 @@ def _apply_sqlite_pragmas(engine: AsyncEngine, *, file_based: bool) -> None:
       documentation only.
     * WAL + ``busy_timeout`` stop "database is locked" errors when the seed
       script or several workers touch the same file.
+    * ``fold()`` - accent/case folding for search (``app.shared.text``);
+      SQLite's built-in ``lower()`` only folds ASCII.
     """
 
     @event.listens_for(engine.sync_engine, "connect")
@@ -57,6 +60,10 @@ def _apply_sqlite_pragmas(engine: AsyncEngine, *, file_based: bool) -> None:
                 cursor.execute("PRAGMA synchronous=NORMAL")
         finally:
             cursor.close()
+        # deterministic=True lets SQLite treat it like a pure built-in.
+        dbapi_connection.create_function(  # type: ignore[attr-defined]
+            FOLD_SQL_FUNCTION, 1, fold_text, deterministic=True
+        )
 
 
 def build_engine(url: str, *, echo: bool = False) -> AsyncEngine:

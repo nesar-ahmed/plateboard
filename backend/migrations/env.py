@@ -1,6 +1,6 @@
 """Alembic environment: async engine, settings-driven URL, SQLite-friendly.
 
-Two deliberate choices:
+Three deliberate choices:
 
 * The DSN comes from :func:`app.core.config.get_settings`, never from
   ``alembic.ini``, so migrations and the running app can never point at
@@ -8,14 +8,22 @@ Two deliberate choices:
 * ``render_as_batch`` is enabled for SQLite because SQLite cannot ``ALTER``
   most constraints; Alembic then emits the documented
   ``batch_alter_table`` "recreate" dance automatically.
+* New revisions get the next sequential 4-digit id (``0005``, ``0006``, ...)
+  instead of Alembic's random hex, matching the existing chain and the
+  ``%(rev)s_%(slug)s`` file template in ``alembic.ini``.
 """
 
 from __future__ import annotations
 
 import asyncio
+import re
+from collections.abc import Iterable
 from logging.config import fileConfig
+from typing import Any
 
 from alembic import context
+from alembic.operations import MigrationScript
+from alembic.script import ScriptDirectory
 from sqlalchemy.engine import Connection
 
 from app.core.config import get_settings
@@ -29,6 +37,45 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 target_metadata = Base.metadata
+
+#: Width of the zero-padded sequential revision ids (``0001`` ... ``9999``).
+REVISION_ID_WIDTH = 4
+
+#: Shape of the id Alembic generates when none is given (``uuid4().hex[-12:]``).
+_ALEMBIC_RANDOM_ID = re.compile(r"[0-9a-f]{12}")
+
+
+def next_revision_id(existing: Iterable[str]) -> str:
+    """The id after the highest numeric one in ``existing`` (``0001`` if none).
+
+    Non-numeric ids (none today) are ignored rather than breaking numbering.
+    """
+    numbers = [int(rev) for rev in existing if rev.isdigit()]
+    return f"{max(numbers, default=0) + 1:0{REVISION_ID_WIDTH}d}"
+
+
+def _sequential_revision_id(
+    _context: Any, _revision: Any, directives: list[MigrationScript]
+) -> None:
+    """``process_revision_directives`` hook: replace the random hex id.
+
+    Numbering considers *every* known revision (not just heads), so an id is
+    never reused. An explicit id wins - ``alembic revision --rev-id ...`` on
+    the CLI or ``command.revision(..., rev_id=...)`` in code - so only ids
+    shaped like Alembic's auto-generated ones are replaced.
+    """
+    if not directives:
+        return
+    script = directives[0]
+    cmd_opts = config.cmd_opts
+    if cmd_opts is not None and getattr(cmd_opts, "rev_id", None):
+        return
+    if not _ALEMBIC_RANDOM_ID.fullmatch(script.rev_id or ""):
+        return
+    scripts = ScriptDirectory.from_config(config)
+    script.rev_id = next_revision_id(
+        revision.revision for revision in scripts.walk_revisions()
+    )
 
 
 def _configure(connection: Connection | None = None, **extra: object) -> None:
@@ -44,6 +91,7 @@ def _configure(connection: Connection | None = None, **extra: object) -> None:
         compare_server_default=False,
         version_table="alembic_version",
         include_schemas=False,
+        process_revision_directives=_sequential_revision_id,
         **extra,
     )
 

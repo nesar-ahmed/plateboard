@@ -2,44 +2,28 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
 
-import { api, type User } from "@/lib/api";
+import CartButton from "@/components/cart-button";
+import { api } from "@/lib/api";
+import { useSession } from "@/lib/session";
 
 /**
- * Top navigation with the live auth state: shows Login/Register when signed
- * out, and the account + Logout when the session cookie is valid. Re-reads
- * /api/me on every route change so login/logout flips immediately.
+ * Top navigation with the live auth state (shared session, see
+ * lib/session.tsx): Login/Register when signed out, the account + Logout
+ * when signed in, and the cart icon with its count for everyone - guests
+ * have carts too.
  */
 export default function Nav() {
   const pathname = usePathname();
   const router = useRouter();
-  const [user, setUser] = useState<User | null>(null);
-  const [checked, setChecked] = useState(false);
-
-  const load = useCallback(async () => {
-    try {
-      setUser(await api.get<User>("/me"));
-    } catch {
-      setUser(null); // any failure (401, backend down) means "not signed in"
-    } finally {
-      setChecked(true);
-    }
-  }, []);
-
-  useEffect(() => {
-    // Kick the first load from a callback rather than the effect body: it
-    // transitively sets state, which react-hooks/set-state-in-effect forbids.
-    const kickOff = window.setTimeout(() => void load(), 0);
-    return () => window.clearTimeout(kickOff);
-  }, [load, pathname]);
+  const { user, checked, refresh } = useSession();
 
   const logout = async () => {
     try {
       await api.post("/auth/logout", {});
     } finally {
-      setUser(null);
-      router.push("/");
+      router.push("/"); // leave signed-in pages first...
+      await refresh(); // ...then become a guest; the cart follows (guest cart)
     }
   };
 
@@ -71,6 +55,7 @@ export default function Nav() {
           </Link>
         </div>
         <div className="flex items-center gap-3">
+          <CartButton />
           {checked && !user && (
             <>
               <Link href="/login" className={linkClass("/login")}>

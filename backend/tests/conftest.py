@@ -22,8 +22,11 @@ from alembic.config import Config as AlembicConfig
 from httpx import ASGITransport, AsyncClient
 
 from app.core.config import BACKEND_ROOT, Settings, reload_settings
-from app.core.db import build_engine, dispose_engine, set_engine
+from app.core.db import build_engine, dispose_engine, get_sessionmaker, set_engine
 from app.main import create_app
+from app.modules.zones import service as zone_service
+from app.modules.zones.models import Zone
+from app.modules.zones.schemas import ZoneCreate
 
 
 def make_alembic_config() -> AlembicConfig:
@@ -129,3 +132,36 @@ def accounts(client):
         customer=customer,
         cook=cook,
     )
+
+
+# --- zones: a small test-owned grid (independent of the seed data) ----------------
+
+#: 3 x 3 service grid, ``(slug, name, x, y)``; x = column, y = row.
+#:
+#:      x=0          x=1            x=2
+#: y=0  north-gate   old-town       hillside
+#: y=1  riverside    market-square  university
+#: y=2  harbour      station        garden-district
+ZONE_GRID: tuple[tuple[str, str, int, int], ...] = (
+    ("north-gate", "North Gate", 0, 0),
+    ("old-town", "Old Town", 1, 0),
+    ("hillside", "Hillside", 2, 0),
+    ("riverside", "Riverside", 0, 1),
+    ("market-square", "Market Square", 1, 1),
+    ("university", "University", 2, 1),
+    ("harbour", "Harbour", 0, 2),
+    ("station", "Station", 1, 2),
+    ("garden-district", "Garden District", 2, 2),
+)
+
+
+@pytest.fixture
+async def zones(client) -> dict[str, Zone]:
+    """The ``ZONE_GRID`` created through the real service, keyed by slug."""
+    created: dict[str, Zone] = {}
+    async with get_sessionmaker()() as session:
+        for slug, name, x, y in ZONE_GRID:
+            created[slug] = await zone_service.create_zone(
+                session, ZoneCreate(slug=slug, name=name, x=x, y=y)
+            )
+    return created
