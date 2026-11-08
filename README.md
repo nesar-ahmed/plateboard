@@ -11,9 +11,9 @@ Two independent apps that each run as their own process:
 - **Frontend** — React (Next.js 16), built in **`standalone` mode**: a
   self-contained Node server (`frontend/.next/standalone/`) you run directly,
   under **pm2**, or behind an **nginx** reverse proxy on a VPS. Public dish
-  list with search, dish and cook pages, login/register, and a cook dashboard
-  for profile + dish management; the old status probe lives on at `/health`.
-  See `frontend/README.md`.
+  list with search, dish and cook pages, login/register, cart + checkout, and
+  a cook dashboard for profile + dish management; the old status probe lives
+  on at `/health`. See `frontend/README.md`.
 
 ## Prerequisites
 
@@ -291,18 +291,20 @@ backend/
   alembic.ini                 # Alembic paths (DSN deliberately lives in settings)
   plateboard.db               # SQLite dev database (created at startup, ignored)
   app/
-    api/
+    api/                      # HTTP wiring only: assembly, shared deps, versions
       health.py               # GET /api/health (intentionally NOT versioned)
+      router.py               # mounts everything under /api
+      deps.py                 # shared FastAPI dependencies (DB session)
+      v1/                     # API version 1 - under development
+    modules/                  # domain features - each owns router/schemas/models/service
       auth/                   # accounts, roles, profiles: scrypt hashing + sessions
       cooks/                  # become-a-cook, cook-only endpoints, public cook pages
       dishes/                 # cook-owned dish CRUD + public active-dish menu + filters
       zones/                  # grid zones, Manhattan grid_distance, GET /api/zones
       cart/                   # guest + account carts (/api/cart), login claim
-      router.py               # mounts everything under /api
-      deps.py                 # shared FastAPI dependencies (DB session)
-      v1/                     # API version 1 - under development
     core/                     # settings, engine (WAL + FK pragmas), logging, errors, docs assets
     shared/                   # declarative Base, mixins, schema helpers
+    models.py                 # central ORM-model import for Alembic
     main.py                   # app factory + single-process API entry point
   migrations/                 # Alembic (env.py reads DATABASE_URL from settings)
   scripts/seed.py             # idempotent demo data; prints fresh credentials
@@ -312,7 +314,7 @@ frontend/
   .env                        # local config (git-ignored, never pushed)
   .env.example                # documented template - committed
   src/app/                    # Next.js App Router: dish directory, cook pages,
-                              # login/register, dashboard, /health probe
+                              # login/register, cart + checkout, dashboard, /health probe
   next.config.ts              # output: "standalone" + /api rewrite
   .next/standalone/           # `npm run build` self-host server (git-ignored)
   README.md

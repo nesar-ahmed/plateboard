@@ -50,7 +50,7 @@ so in production `API_ORIGIN` must be reachable from the Next server at
 *runtime* (not only at build time). Prices are shown in major
 units and stored as integer minor units; the dashboard form does the
 conversion. The allergen checkbox list mirrors the backend enum
-(`src/lib/allergens.ts` ↔ `backend/app/api/dishes/models.py`).
+(`src/lib/allergens.ts` ↔ `backend/app/modules/dishes/models.py`).
 
 Try it with seeded data: `cd ../backend && uv run python scripts/seed.py`
 prints `@example.com` credentials you can log in with.

@@ -151,7 +151,7 @@ foreign-key pragmas for real.
 app/
   api/            # HTTP wiring only: router assembly, shared deps, versioning
     health.py     # GET /api/health (NOT versioned - stable probe URL)
-    router.py     # mounts /api (health + auth + cooks + dishes + v1)
+    router.py     # mounts /api (health + auth + cooks + dishes + zones + cart + v1)
     deps.py       # shared DB-session dependency
     v1/           # API version 1, under development
   modules/        # domain features - each package owns router, schemas,
