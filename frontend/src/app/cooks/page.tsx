@@ -1,87 +1,67 @@
-"use client";
+import { ChefHat } from "lucide-react";
+import type { Metadata } from "next";
 
-import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import CookCard from "@/components/cook-card";
+import { ButtonLink, EmptyState, ErrorBanner, Page, PageHeader } from "@/components/ui";
+import { ApiError, type CookPage } from "@/lib/api";
+import { serverGet } from "@/lib/server-api";
 
-import { Card, ErrorBanner, Pager, Tag } from "@/components/ui";
-import { api, ApiError, type CookPage } from "@/lib/api";
+export const metadata: Metadata = { title: "Home cooks" };
 
 const PAGE_SIZE = 12;
 
-/** Public directory of cooks: GET /api/cooks (paginated). */
-export default function CookDirectory() {
-  const [offset, setOffset] = useState(0);
-  const [page, setPage] = useState<CookPage | null>(null);
-  const [errors, setErrors] = useState<string[]>([]);
-
-  const load = useCallback(async () => {
-    try {
-      setPage(
-        await api.get<CookPage>(`/cooks?limit=${PAGE_SIZE}&offset=${offset}`),
-      );
-      setErrors([]);
-    } catch (cause) {
-      setPage(null);
-      setErrors(cause instanceof ApiError ? [cause.message] : ["Could not reach the API"]);
-    }
-  }, [offset]);
-
-  useEffect(() => {
-    // Timeout kick-off: the effect body must not directly call a
-    // setState-transitive function (react-hooks/set-state-in-effect).
-    const kickOff = window.setTimeout(() => void load(), 0);
-    return () => window.clearTimeout(kickOff);
-  }, [load]);
+/** Public directory of cooks (GET /api/cooks), rendered on the server; `?offset=` pages. */
+export default async function CookDirectory({ searchParams }: PageProps<"/cooks">) {
+  const raw = (await searchParams).offset;
+  const offset = Math.max(0, Number.parseInt(Array.isArray(raw) ? raw[0] : (raw ?? "0"), 10) || 0);
+  let page: CookPage | null = null;
+  let errors: string[] = [];
+  try {
+    page = await serverGet<CookPage>(`/cooks?limit=${PAGE_SIZE}&offset=${offset}`);
+  } catch (cause) {
+    errors = cause instanceof ApiError ? cause.lines : ["Could not reach the API"];
+  }
 
   return (
-    <div className="space-y-6">
-      <header>
-        <h1 className="text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
-          Meet the cooks
-        </h1>
-        <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-          Home cooks with a public Plateboard profile.
-        </p>
-      </header>
-
+    <Page>
+      <PageHeader
+        eyebrow="The people behind the food"
+        title="Meet the cooks"
+        lead="Home cooks with a public Plateboard kitchen. Open a profile to see what they're cooking today."
+      />
       <ErrorBanner lines={errors} />
-
       {page && page.items.length === 0 && (
-        <p className="text-sm text-zinc-500">No cooks yet - the first one is a register away.</p>
+        <EmptyState
+          icon={<ChefHat className="h-6 w-6" />}
+          title="No cooks yet"
+          action={<ButtonLink href="/register?next=/cook">Open your kitchen</ButtonLink>}
+        >
+          The first kitchen is a sign-up away.
+        </EmptyState>
       )}
-
       {page && page.items.length > 0 && (
-        <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <ul className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {page.items.map((cook) => (
             <li key={cook.user_id}>
-              <Card>
-                <h2 className="text-base font-semibold text-zinc-900 dark:text-zinc-50">
-                  <Link href={`/cooks/${cook.user_id}`} className="hover:underline">
-                    {cook.display_name ?? "A home cook"}
-                  </Link>
-                </h2>
-                <p className="mt-0.5 text-sm text-zinc-500 dark:text-zinc-400">{cook.headline}</p>
-                {(cook.area || cook.zone) && (
-                  <p className="mt-2 text-xs text-zinc-400">
-                    {[cook.area, cook.zone && `zone: ${cook.zone.name}`].filter(Boolean).join(" · ")}
-                  </p>
-                )}
-                {cook.specialties.length > 0 && (
-                  <div className="mt-3 flex flex-wrap gap-1.5">
-                    {cook.specialties.map((specialty) => (
-                      <Tag key={specialty}>{specialty}</Tag>
-                    ))}
-                  </div>
-                )}
-              </Card>
+              <CookCard cook={cook} />
             </li>
           ))}
         </ul>
       )}
-
       {page && page.total > PAGE_SIZE && (
-        <Pager total={page.total} limit={PAGE_SIZE} offset={offset} onMove={setOffset} />
+        <nav aria-label="Pagination" className="mt-10 flex justify-center gap-2 border-t border-line pt-6">
+          {offset > 0 && (
+            <ButtonLink variant="ghost" href={`/cooks?offset=${Math.max(0, offset - PAGE_SIZE)}`}>
+              Previous
+            </ButtonLink>
+          )}
+          {offset + PAGE_SIZE < page.total && (
+            <ButtonLink variant="ghost" href={`/cooks?offset=${offset + PAGE_SIZE}`}>
+              Next
+            </ButtonLink>
+          )}
+        </nav>
       )}
-    </div>
+    </Page>
   );
 }

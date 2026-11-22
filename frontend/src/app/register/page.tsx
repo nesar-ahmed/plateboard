@@ -1,12 +1,18 @@
 "use client";
 
+import { ArrowRight, Check } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useState } from "react";
 
-import { Card, ErrorBanner, Field, inputClass, primaryButtonClass } from "@/components/ui";
+import AuthShell from "@/components/auth-shell";
+import PasswordInput from "@/components/password-input";
+import { ErrorBanner, Field, Spinner, cx, inputClass, primaryButtonClass } from "@/components/ui";
 import { api, ApiError, type User } from "@/lib/api";
 import { safeNextPath, useSession } from "@/lib/session";
+
+const PASSWORD_MIN = 8;
+const NAME_MAX = 60;
 
 /** `useSearchParams` (the `?next=` target) needs a Suspense boundary. */
 export default function RegisterPage() {
@@ -18,25 +24,28 @@ export default function RegisterPage() {
 }
 
 /**
- * POST /api/auth/register then POST /api/auth/login (registration returns no
- * session on its own). The login moves a guest cart to the new account, so
- * "register at checkout" keeps the dishes; then `?next=` or the dashboard.
+ * POST /api/auth/register, POST /api/auth/login (registration returns no
+ * session on its own), then PATCH /api/me/profile with the name. The login
+ * moves a guest cart to the new account, so "register at checkout" keeps the
+ * dishes; then `?next=` or the account (/account). A failed name save never blocks
+ * the new account - the name can be set later in /account/profile.
  */
 function RegisterForm() {
   const router = useRouter();
   const params = useSearchParams();
   const next = safeNextPath(params.get("next"));
   const { refresh } = useSession();
+  const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [repeat, setRepeat] = useState("");
   const [busy, setBusy] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
+  const longEnough = password.length >= PASSWORD_MIN;
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (password !== repeat) {
-      setErrors(["passwords do not match"]);
+    if (!longEnough) {
+      setErrors([`Use at least ${PASSWORD_MIN} characters for your password.`]);
       return;
     }
     setBusy(true);
@@ -44,65 +53,73 @@ function RegisterForm() {
     try {
       await api.post<User>("/auth/register", { email, password });
       await api.post<User>("/auth/login", { email, password });
+      if (name.trim()) {
+        await api.patch<User>("/me/profile", { display_name: name.trim() }).catch(() => undefined);
+      }
       await refresh();
       router.push(next);
     } catch (cause) {
       setErrors(cause instanceof ApiError ? cause.lines : ["Could not reach the API"]);
-    } finally {
       setBusy(false);
     }
   };
 
   return (
-    <div className="mx-auto w-full max-w-md">
-      <Card title="Create an account">
-        <form onSubmit={submit} className="space-y-4">
-          <ErrorBanner lines={errors} />
-          <Field label="Email">
-            <input
-              type="email"
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-              autoComplete="email"
-              required
-              className={inputClass}
-            />
-          </Field>
-          <Field label="Password" hint="At least 8 characters.">
-            <input
-              type="password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              autoComplete="new-password"
-              required
-              minLength={8}
-              className={inputClass}
-            />
-          </Field>
-          <Field label="Repeat password">
-            <input
-              type="password"
-              value={repeat}
-              onChange={(event) => setRepeat(event.target.value)}
-              autoComplete="new-password"
-              required
-              className={inputClass}
-            />
-          </Field>
-          <button type="submit" disabled={busy} className={primaryButtonClass}>
-            {busy ? "Creating..." : "Register"}
-          </button>
-          <p className="text-sm text-zinc-500 dark:text-zinc-400">
-            Already registered?{" "}
-            <Link
-              href={next === "/dashboard" ? "/login" : `/login?next=${encodeURIComponent(next)}`}
-              className="text-emerald-700 hover:underline dark:text-emerald-400"
-            >
-              Log in
-            </Link>
-          </p>
-        </form>
-      </Card>
-    </div>
+    <AuthShell
+      title="Create your account"
+      subtitle={next === "/checkout" ? "One step before checkout - your bag is saved." : "Order from home cooks near you in minutes."}
+    >
+      <form onSubmit={submit} className="space-y-5">
+        <ErrorBanner lines={errors} />
+        <Field label="Your name" optional hint="Shown to the cooks you order from.">
+          <input
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+            autoComplete="name"
+            maxLength={NAME_MAX}
+            autoFocus
+            className={inputClass}
+          />
+        </Field>
+        <Field label="Email">
+          <input
+            type="email"
+            value={email}
+            onChange={(event) => setEmail(event.target.value)}
+            autoComplete="email"
+            required
+            className={inputClass}
+          />
+        </Field>
+        <Field label="Password">
+          <PasswordInput
+            value={password}
+            onChange={(event) => setPassword(event.target.value)}
+            autoComplete="new-password"
+            required
+            maxLength={128}
+            aria-describedby="password-rule"
+          />
+          <span
+            id="password-rule"
+            className={cx("mt-1.5 flex items-center gap-1.5 text-xs", longEnough ? "text-herb" : "text-ink-soft")}
+          >
+            <Check className="h-3.5 w-3.5" aria-hidden="true" /> At least {PASSWORD_MIN} characters
+          </span>
+        </Field>
+        <button type="submit" disabled={busy} className={cx(primaryButtonClass, "h-12 w-full text-[15px]")}>
+          {busy ? <Spinner /> : null} Create account {!busy && <ArrowRight className="h-4 w-4" />}
+        </button>
+        <p className="text-center text-sm text-ink-muted">
+          Already have an account?{" "}
+          <Link
+            href={next === "/account" ? "/login" : `/login?next=${encodeURIComponent(next)}`}
+            className="font-semibold text-brand hover:underline"
+          >
+            Log in
+          </Link>
+        </p>
+      </form>
+    </AuthShell>
   );
 }
