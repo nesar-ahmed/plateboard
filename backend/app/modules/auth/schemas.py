@@ -14,6 +14,8 @@ from pydantic import (
     model_validator,
 )
 
+from app.modules.dishes.models import ALLERGEN_VALUES, Allergen
+from app.modules.dishes.schemas import validate_tag_list
 from app.shared.types import UTCDateTime
 
 PASSWORD_MIN_LENGTH = 8
@@ -82,4 +84,89 @@ class UserOut(BaseModel):
     area: str | None
     roles: list[str]
     created_at: UTCDateTime
-    updated_at: UTCDateTime  # bumps on profile edits / become-a-cook
+    updated_at: UTCDateTime  # bumps on profile edits / an accepted cook application
+
+
+# --- account: food preferences, password, sessions ---------------------------------
+
+DIETARY_PREFERENCE_MAX_LENGTH = 30
+DIETARY_PREFERENCE_MAX_COUNT = 10
+
+
+class PreferencesOut(BaseModel):
+    """The account's food profile (``GET/PUT /api/me/preferences``)."""
+
+    excluded_allergens: list[Allergen] = Field(
+        description="allergens to keep off the menu, from the fixed Allergen vocabulary"
+    )
+    dietary_preferences: list[str] = Field(
+        description="diets the user follows, e.g. vegan, halal (lowercase tags)"
+    )
+
+
+class PreferencesUpdate(BaseModel):
+    """Full replacement (PUT): send both lists; an empty list clears one.
+
+    Allergens must be known (422 otherwise) and are de-duplicated; diets are
+    trimmed, lowercased tags - the same rules as dish dietary tags.
+    """
+
+    model_config = ConfigDict(use_enum_values=True)
+
+    excluded_allergens: list[Allergen] = Field(
+        default_factory=list, max_length=len(ALLERGEN_VALUES)
+    )
+    dietary_preferences: list[str] = Field(
+        default_factory=list, max_length=DIETARY_PREFERENCE_MAX_COUNT
+    )
+
+    @field_validator("excluded_allergens")
+    @classmethod
+    def _dedupe(cls, values: list[Allergen]) -> list[Allergen]:
+        return list(dict.fromkeys(values))
+
+    @field_validator("dietary_preferences")
+    @classmethod
+    def _clean_diets(cls, values: list[str]) -> list[str]:
+        return validate_tag_list(
+            values,
+            label="dietary preferences",
+            max_length=DIETARY_PREFERENCE_MAX_LENGTH,
+            max_count=DIETARY_PREFERENCE_MAX_COUNT,
+        )
+
+
+class PasswordChangeRequest(BaseModel):
+    """``POST /api/me/password``: the current password proves it is you; the
+    new one follows the registration rules and must differ from it."""
+
+    current_password: str = Field(min_length=1, max_length=PASSWORD_MAX_LENGTH)
+    new_password: str = Field(
+        min_length=PASSWORD_MIN_LENGTH, max_length=PASSWORD_MAX_LENGTH
+    )
+
+    @model_validator(mode="after")
+    def _must_change(self) -> Self:
+        if self.current_password == self.new_password:
+            raise ValueError("the new password must differ from the current one")
+        return self
+
+
+class PasswordChangedOut(BaseModel):
+    signed_out_sessions: int = Field(
+        description="other sessions ended by the change (this one stays signed in)"
+    )
+
+
+class SessionOut(BaseModel):
+    """One signed-in session of the account. ``id`` is a short fingerprint of
+    the stored token hash - enough to tell sessions apart, useless to replay."""
+
+    id: str
+    created_at: UTCDateTime
+    expires_at: UTCDateTime
+    current: bool = Field(description="the session making this request")
+
+
+class SessionsRevokedOut(BaseModel):
+    signed_out_sessions: int

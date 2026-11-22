@@ -8,12 +8,15 @@ redraw the cart after a change.
 from __future__ import annotations
 
 import uuid
-from typing import Literal, Self
+from typing import TYPE_CHECKING, Literal, Self
 
 from pydantic import BaseModel, Field, model_validator
 
 from app.modules.cart.models import MAX_QUANTITY, MIN_QUANTITY
 from app.shared.types import UTCDateTime
+
+if TYPE_CHECKING:  # the service imports this module; no runtime cycle
+    from app.modules.cart.service import CartView
 
 #: Distinct dishes one cart may hold.
 MAX_CART_LINES = 50
@@ -27,6 +30,7 @@ __all__ = [
     "CartItemOut",
     "CartItemUpdate",
     "CartOut",
+    "cart_out",
 ]
 
 
@@ -99,3 +103,28 @@ class CartOut(BaseModel):
     item_count: int = Field(description="portions across available lines")
     total: int = Field(description="sum of available line totals, minor units")
     unavailable_count: int = Field(description="lines whose dish was deactivated")
+
+
+def cart_out(view: CartView) -> CartOut:
+    """Service read model -> response. Shared by every router that answers
+    with the cart (``/api/cart`` and adding a favourite to the cart)."""
+    return CartOut(
+        owner=view.owner,
+        cook=CartCookOut(id=view.cook_id, name=view.cook_name) if view.cook_id else None,
+        items=[
+            CartItemOut(
+                dish_id=line.dish.id,
+                name=line.dish.name,
+                price=line.dish.price,
+                quantity=line.item.quantity,
+                line_total=line.line_total,
+                available=line.available,
+                max_quantity=MAX_QUANTITY,
+                added_at=line.item.created_at,
+            )
+            for line in view.lines
+        ],
+        item_count=view.item_count,
+        total=view.total,
+        unavailable_count=view.unavailable_count,
+    )

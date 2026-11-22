@@ -162,6 +162,7 @@ async def test_become_cook_with_a_zone(accounts, zones) -> None:
         "x": 1,
         "y": 1,
     }
+    await accounts.approve()
     mine = await accounts.client.get("/api/cooks/me")
     assert mine.json()["zone"]["slug"] == "market-square"
 
@@ -184,8 +185,9 @@ async def test_unknown_zone_is_a_422_naming_the_field(accounts, zones) -> None:
     assert error["code"] == "validation_failed"
     assert error["details"][0]["field"] == "zone"
     assert error["details"][0]["type"] == "unknown_zone"
-    # ...and nothing was created: still not a cook.
+    # ...and nothing was created: still not a cook, not even an application.
     assert "cook" not in (await accounts.client.get("/api/me")).json()["roles"]
+    assert (await accounts.client.get("/api/cooks/me/application")).status_code == 404
 
 
 async def test_cook_moves_and_clears_zone(accounts, zones) -> None:

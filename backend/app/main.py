@@ -37,7 +37,11 @@ logger = logging.getLogger(__name__)
 OPENAPI_TAGS = [
     {"name": "system", "description": "Health probes and service metadata."},
     {"name": "auth", "description": "Accounts, roles and server-side sessions."},
-    {"name": "cooks", "description": "Cook profiles (role: cook)."},
+    {
+        "name": "cooks",
+        "description": "Cook profiles and availability (role: cook), and the "
+        "public cook pages (verified badge, availability, stats).",
+    },
     {
         "name": "dishes",
         "description": "Menu dishes: cook-only management (/api/me/dishes) "
@@ -49,7 +53,44 @@ OPENAPI_TAGS = [
     },
     {
         "name": "cart",
-        "description": "The signed-in user's cart: dishes and quantities (/api/me/cart).",
+        "description": "The cart - guest (cookie) or signed-in: dishes and quantities "
+        "(/api/cart).",
+    },
+    {
+        "name": "favourites",
+        "description": "The signed-in customer's favourite dishes (max 50; hidden "
+        "dishes stay listed as unavailable) and adding them to the cart "
+        "(/api/me/favourites).",
+    },
+    {
+        "name": "addresses",
+        "description": "The signed-in user's delivery addresses (/api/me/addresses).",
+    },
+    {
+        "name": "orders",
+        "description": "Placing the cart as an order (/api/me/orders) and the cook's "
+        "incoming orders + status changes (/api/cooks/me/orders).",
+    },
+    {
+        "name": "reviews",
+        "description": "Ratings (1..5) and reviews of dishes the customer received, "
+        "and the cook's replies.",
+    },
+    {
+        "name": "dashboards",
+        "description": "Read-only summaries: customer (/api/me/dashboard), cook "
+        "(/api/cooks/me/dashboard + /api/cooks/me/earnings) and admin "
+        "(/api/admin/dashboard).",
+    },
+    {
+        "name": "admin",
+        "description": "Back office - all users and orders, and cook verification "
+        "(role: admin).",
+    },
+    {
+        "name": "notifications",
+        "description": "The signed-in user's in-app notifications, one inbox per "
+        "panel - account, cook, admin (/api/me/notifications).",
     },
     {"name": "v1", "description": "API version 1 - under development."},
 ]

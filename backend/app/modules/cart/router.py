@@ -29,12 +29,10 @@ from app.modules.cart.cookies import (
     set_guest_cookie,
 )
 from app.modules.cart.schemas import (
-    MAX_QUANTITY,
-    CartCookOut,
     CartItemAdd,
-    CartItemOut,
     CartItemUpdate,
     CartOut,
+    cart_out,
 )
 
 cart_router = APIRouter(prefix="/api/cart", tags=["cart"])
@@ -51,29 +49,6 @@ def resolve_owner(request: Request, user: OptionalUser) -> service.CartOwner:
 Owner = Annotated[service.CartOwner, Depends(resolve_owner)]
 
 
-def _cart_out(view: service.CartView) -> CartOut:
-    return CartOut(
-        owner=view.owner,
-        cook=CartCookOut(id=view.cook_id, name=view.cook_name) if view.cook_id else None,
-        items=[
-            CartItemOut(
-                dish_id=line.dish.id,
-                name=line.dish.name,
-                price=line.dish.price,
-                quantity=line.item.quantity,
-                line_total=line.line_total,
-                available=line.available,
-                max_quantity=MAX_QUANTITY,
-                added_at=line.item.created_at,
-            )
-            for line in view.lines
-        ],
-        item_count=view.item_count,
-        total=view.total,
-        unavailable_count=view.unavailable_count,
-    )
-
-
 async def _current_cart(
     db: DbSession, owner: service.CartOwner, response: Response
 ) -> CartOut:
@@ -82,7 +57,7 @@ async def _current_cart(
     # is dead weight - drop it so the next add starts cleanly.
     if owner.user_id is None and owner.guest_token and view.cart_id is None:
         clear_guest_cookie(response)
-    return _cart_out(view)
+    return cart_out(view)
 
 
 @cart_router.get("", response_model=CartOut)

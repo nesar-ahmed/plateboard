@@ -4,10 +4,11 @@ Cook-only management lives under ``/api/me/dishes`` (every handler goes
 through ``require_cook``, so customers see 403 and anonymous requests 401;
 per-dish routes re-check ownership in the service -> 404):
 
-* POST   /api/me/dishes            - add a dish to my menu
-* GET    /api/me/dishes            - my dashboard list (incl. deactivated)
+* POST   /api/me/dishes            - add a dish (public, or ``active: false``
+                                     for a private draft)
+* GET    /api/me/dishes            - my dashboard list (public + private)
 * GET    /api/me/dishes/{id}       - one of my dishes
-* PATCH  /api/me/dishes/{id}       - edit / deactivate / reactivate
+* PATCH  /api/me/dishes/{id}       - edit / make private / publish
 * DELETE /api/me/dishes/{id}       - remove for good
 
 The public menu is a separate, unauthenticated router under ``/api/dishes``:
@@ -38,6 +39,8 @@ from app.modules.dishes.schemas import (
     PublicDishOut,
     PublicDishQuery,
 )
+from app.modules.reviews import service as review_service
+from app.modules.reviews.schemas import rating_out
 from app.modules.zones.schemas import ZoneOut
 
 dish_router = APIRouter(prefix="/api/me/dishes", tags=["dishes"])
@@ -51,12 +54,15 @@ PageLimit = Annotated[int, Query(ge=1, le=100, description="page size")]
 PageOffset = Annotated[int, Query(ge=0, description="rows to skip")]
 
 
-def _public_out(row: service.PublicDishRow) -> PublicDishOut:
+def _public_out(
+    row: service.PublicDishRow, rating: review_service.Rating | None = None
+) -> PublicDishOut:
     return PublicDishOut.model_validate(row.dish).model_copy(
         update={
             "cook_name": row.cook_name,
             "zone": ZoneOut.model_validate(row.zone) if row.zone else None,
             "distance": row.distance,
+            "rating": rating_out(rating),
         }
     )
 
@@ -121,8 +127,9 @@ async def list_public_dishes(
     total, rows = await service.page_public_dishes(
         db, filters, limit=limit, offset=offset
     )
+    ratings = await review_service.dish_ratings(db, (row.dish.id for row in rows))
     return DishPage(
-        items=[_public_out(row) for row in rows],
+        items=[_public_out(row, ratings.get(row.dish.id)) for row in rows],
         total=total,
         limit=limit,
         offset=offset,
@@ -131,4 +138,6 @@ async def list_public_dishes(
 
 @public_dish_router.get("/{dish_id}", response_model=PublicDishOut)
 async def get_public_dish(dish_id: uuid.UUID, db: DbSession) -> PublicDishOut:
-    return _public_out(await service.get_public_dish(db, dish_id))
+    row = await service.get_public_dish(db, dish_id)
+    ratings = await review_service.dish_ratings(db, [dish_id])
+    return _public_out(row, ratings.get(dish_id))

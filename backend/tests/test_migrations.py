@@ -17,7 +17,7 @@ from alembic.script import Script
 from app.core.config import BACKEND_ROOT
 from tests.conftest import make_alembic_config
 
-EXPECTED_HEAD = "0006"
+EXPECTED_HEAD = "0016"
 
 
 def rev_after_head(steps: int = 1) -> str:
@@ -130,7 +130,9 @@ def test_zones_migration_keeps_existing_cooks(environment, tmp_path: Path) -> No
     command.upgrade(config, "head")
     conn = sqlite3.connect(db)
     try:
-        rows = conn.execute("SELECT headline, specialties, zone_id FROM cooks").fetchall()
+        rows = conn.execute(
+            "SELECT headline, specialties, zone_id FROM cooks"
+        ).fetchall()
         fks = {
             (row[2], row[3]): row[6]  # (table, from) -> on_delete
             for row in conn.execute("PRAGMA foreign_key_list(cooks)")
@@ -138,7 +140,14 @@ def test_zones_migration_keeps_existing_cooks(environment, tmp_path: Path) -> No
     finally:
         conn.close()
     assert rows == [("Cooking since 0004", '["soup"]', None)]
-    assert fks == {("users", "user_id"): "CASCADE", ("zones", "zone_id"): "SET NULL"}
+    # (at head; 0011 adds the verifying admin, 0013 the reviewing one - and
+    # their own rebuilds keep the rest)
+    assert fks == {
+        ("users", "user_id"): "CASCADE",
+        ("zones", "zone_id"): "SET NULL",
+        ("users", "verified_by_id"): "SET NULL",
+        ("users", "reviewed_by_id"): "SET NULL",
+    }
 
     command.downgrade(config, "0004")
     conn = sqlite3.connect(db)
@@ -149,3 +158,162 @@ def test_zones_migration_keeps_existing_cooks(environment, tmp_path: Path) -> No
         conn.close()
     assert "zone_id" not in columns
     assert count == 1
+
+
+# --- 0008-0014 downgrades never cascade-delete child rows ---------------------------
+
+
+def test_downgrades_keep_parent_and_child_rows(environment, tmp_path: Path) -> None:
+    """0009 drops columns from ``users``, 0010 and 0008 from ``orders`` - both
+    are parents of ON DELETE CASCADE children. A batch-mode "recreate" would drop
+    and rebuild those tables, and with foreign keys ON that deletes every
+    child row; the downgrades must use native DROP COLUMN instead."""
+    db = tmp_path / "test.db"
+    conn = sqlite3.connect(db)
+    try:
+        conn.execute("PRAGMA foreign_keys=ON")
+        for uid, email in (
+            ("c" * 32, "cook@example.com"),
+            ("d" * 32, "buyer@example.com"),
+        ):
+            conn.execute(
+                "INSERT INTO users (id, email, password_hash) VALUES (?, ?, ?)",
+                (uid, email, "x"),
+            )
+        conn.execute(
+            "INSERT INTO sessions (token_hash, user_id, expires_at) VALUES (?, ?, ?)",
+            ("e" * 64, "d" * 32, "2999-01-01 00:00:00"),
+        )
+        conn.execute(
+            "INSERT INTO cooks (user_id, headline, specialties, verified_at, verified_by_id,"
+            " opening_hours, status) VALUES (?, 'Soups', '[]', '2026-01-01 00:00:00', ?, ?,"
+            " 'accepted')",
+            ("c" * 32, "d" * 32, '[{"day": 0, "opens": "09:00", "closes": "17:00"}]'),
+        )
+        conn.execute(
+            "INSERT INTO orders (id, customer_id, cook_id, status, total, item_count)"
+            " VALUES (?, ?, ?, 'placed', 500, 1)",
+            ("f" * 32, "d" * 32, "c" * 32),
+        )
+        conn.execute(
+            "INSERT INTO order_items (id, order_id, position, name, unit_price, quantity)"
+            " VALUES (?, ?, 0, 'Soup', 500, 1)",
+            ("a" * 32, "f" * 32),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    config = make_alembic_config()
+    command.downgrade(config, "0013")  # 0014: native DROP COLUMN on orders (a parent)
+    conn = sqlite3.connect(db)
+    try:
+        lines = conn.execute("SELECT count(*) FROM order_items").fetchone()[0]
+        order_columns = [row[1] for row in conn.execute("PRAGMA table_info(orders)")]
+    finally:
+        conn.close()
+    assert lines == 1
+    assert "fulfilment" not in order_columns
+
+    command.downgrade(config, "0010")  # 0013 + 0011: batch-rebuild cooks (a child)
+    conn = sqlite3.connect(db)
+    try:
+        cooks = conn.execute("SELECT user_id, headline FROM cooks").fetchall()
+        cook_columns = [row[1] for row in conn.execute("PRAGMA table_info(cooks)")]
+    finally:
+        conn.close()
+    assert cooks == [("c" * 32, "Soups")]
+    assert "opening_hours" not in cook_columns and "verified_at" not in cook_columns
+
+    command.downgrade(config, "0009")
+    conn = sqlite3.connect(db)
+    try:
+        lines = conn.execute("SELECT count(*) FROM order_items").fetchone()[0]
+        order_columns = [row[1] for row in conn.execute("PRAGMA table_info(orders)")]
+    finally:
+        conn.close()
+    assert lines == 1  # 0010's downgrade kept the order line
+    assert "cancel_reason" not in order_columns
+
+    command.downgrade(config, "0007")
+    conn = sqlite3.connect(db)
+    try:
+        counts = {
+            table: conn.execute(f"SELECT count(*) FROM {table}").fetchone()[0]
+            for table in ("users", "sessions", "orders", "order_items")
+        }
+        user_columns = [row[1] for row in conn.execute("PRAGMA table_info(users)")]
+        order_columns = [row[1] for row in conn.execute("PRAGMA table_info(orders)")]
+    finally:
+        conn.close()
+    assert counts == {"users": 2, "sessions": 1, "orders": 1, "order_items": 1}
+    # ...and back up: existing kitchens get the defaults (no fixed hours).
+    assert "excluded_allergens" not in user_columns
+    assert "delivery_address" not in order_columns
+
+    command.upgrade(config, "head")  # and back up again cleanly
+    conn = sqlite3.connect(db)
+    try:
+        kitchen = conn.execute(
+            "SELECT timezone, opening_hours, orders_paused, verified_at FROM cooks"
+        ).fetchone()
+    finally:
+        conn.close()
+    assert kitchen == ("UTC", "[]", 0, None)
+
+
+# --- 0013: cook applications grandfather existing kitchens ---------------------------
+
+
+def test_cook_applications_migration(environment, tmp_path: Path) -> None:
+    """Upgrading makes every existing kitchen ``accepted`` (reviewed when it
+    was created); downgrading drops the applications that were never
+    accepted - before 0013 a cooks row *is* a kitchen."""
+    config = make_alembic_config()
+    command.downgrade(config, "0012")
+    db = tmp_path / "test.db"
+    conn = sqlite3.connect(db)
+    try:
+        for uid, email in (
+            ("a" * 32, "old@example.com"),
+            ("b" * 32, "new@example.com"),
+        ):
+            conn.execute(
+                "INSERT INTO users (id, email, password_hash) VALUES (?, ?, 'x')",
+                (uid, email),
+            )
+        conn.execute(
+            "INSERT INTO cooks (user_id, headline, specialties, created_at)"
+            " VALUES (?, 'Old kitchen', '[]', '2026-01-02 03:04:05')",
+            ("a" * 32,),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    command.upgrade(config, "head")
+    conn = sqlite3.connect(db)
+    try:
+        kitchen = conn.execute(
+            "SELECT status, submitted_at, reviewed_at, reviewed_by_id FROM cooks"
+        ).fetchone()
+        conn.execute(
+            "INSERT INTO cooks (user_id, headline, specialties) VALUES (?, 'New', '[]')",
+            ("b" * 32,),
+        )
+        conn.commit()
+        fresh = conn.execute(
+            "SELECT status FROM cooks WHERE user_id = ?", ("b" * 32,)
+        ).fetchone()
+    finally:
+        conn.close()
+    assert kitchen == ("accepted", "2026-01-02 03:04:05", "2026-01-02 03:04:05", None)
+    assert fresh == ("pending",)
+
+    command.downgrade(config, "0012")
+    conn = sqlite3.connect(db)
+    try:
+        kept = conn.execute("SELECT headline FROM cooks").fetchall()
+    finally:
+        conn.close()
+    assert kept == [("Old kitchen",)]

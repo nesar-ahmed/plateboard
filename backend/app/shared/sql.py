@@ -12,6 +12,13 @@ containment (``@>`` / ``?|``) - callers would not change.
 The ``folded_*`` helpers implement text search: both sides go through the
 ``fold()`` SQL function (accent/case folding, see ``app.shared.text``) and the
 term is matched as a literal substring (``%``/``_`` escaped).
+
+The ``*_bucket`` helpers label a timestamp with its calendar day / ISO week /
+month, as text (``2026-11-08`` / ``2026-11-02`` - the week's Monday /
+``2026-11``), for ``GROUP BY`` in dashboard time series. Stored timestamps are
+naive UTC, so buckets are UTC days. (PostgreSQL: ``to_char(column,
+'YYYY-MM-DD')``, ``date_trunc('week', column)``.) ``minutes_between`` is the matching
+duration helper (PostgreSQL: ``extract(epoch from end - start) / 60``).
 """
 
 from __future__ import annotations
@@ -24,11 +31,15 @@ from sqlalchemy import ColumnElement, SQLColumnExpression, exists, func, literal
 from app.shared.text import FOLD_SQL_FUNCTION
 
 __all__ = [
+    "day_bucket",
     "folded",
     "folded_contains",
     "json_array_any_folded_contains",
     "json_array_contains",
     "json_array_contains_any",
+    "minutes_between",
+    "month_bucket",
+    "week_bucket",
 ]
 
 
@@ -81,3 +92,29 @@ def json_array_any_folded_contains(
         .select_from(elements)
         .where(folded(elements.c.value).contains(term, autoescape=True))
     )
+
+
+def day_bucket(column: SQLColumnExpression[Any]) -> ColumnElement[str]:
+    """``YYYY-MM-DD`` of a (naive UTC) timestamp column."""
+    return func.strftime("%Y-%m-%d", column)
+
+
+def week_bucket(column: SQLColumnExpression[Any]) -> ColumnElement[str]:
+    """``YYYY-MM-DD`` of the Monday starting the (ISO) week of the timestamp.
+
+    SQLite's ``weekday 1`` moves *forward* to the next Monday (or stays on
+    one), so step back six days first: any day lands on its own week's Monday.
+    """
+    return func.date(column, "-6 days", "weekday 1")
+
+
+def month_bucket(column: SQLColumnExpression[Any]) -> ColumnElement[str]:
+    """``YYYY-MM`` of a (naive UTC) timestamp column."""
+    return func.strftime("%Y-%m", column)
+
+
+def minutes_between(
+    start: SQLColumnExpression[Any], end: SQLColumnExpression[Any]
+) -> ColumnElement[float]:
+    """``end - start`` in (fractional) minutes; NULL if either is NULL."""
+    return (func.julianday(end) - func.julianday(start)) * 1440.0

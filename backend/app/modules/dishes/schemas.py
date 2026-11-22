@@ -30,6 +30,7 @@ from pydantic import (
 )
 
 from app.modules.dishes.models import ALLERGEN_VALUES, Allergen
+from app.modules.reviews.schemas import RatingOut
 from app.modules.zones.grid import MAX_GRID_DISTANCE
 from app.modules.zones.models import SLUG_MAX_LENGTH as ZONE_SLUG_MAX_LENGTH
 from app.modules.zones.schemas import ZoneOut, normalize_zone_slug
@@ -84,8 +85,16 @@ def validate_description(value: str | None) -> str | None:
     return value.strip() or None
 
 
+#: ``Dish.active`` is the dish's visibility switch (see its description).
+ACTIVE_DESCRIPTION = (
+    "public: listed on the menu (/api/dishes) and orderable. false = private: "
+    "only the cook sees it (/api/me/dishes) - a draft or a paused dish"
+)
+
+
 class DishCreateRequest(BaseModel):
-    """Body for ``POST /api/me/dishes``. New dishes start active."""
+    """Body for ``POST /api/me/dishes``. New dishes are public unless sent
+    with ``"active": false`` (a private draft to publish later)."""
 
     # Stored payload holds plain allergen token strings, never enum objects.
     model_config = ConfigDict(use_enum_values=True)
@@ -99,6 +108,7 @@ class DishCreateRequest(BaseModel):
         default_factory=list, max_length=len(ALLERGEN_VALUES)
     )
     dietary_tags: list[str] = Field(default_factory=list, max_length=TAG_MAX_COUNT)
+    active: bool = Field(default=True, description=ACTIVE_DESCRIPTION)
 
     @field_validator("name")
     @classmethod
@@ -136,8 +146,9 @@ class DishCreateRequest(BaseModel):
 
 
 class DishPatchRequest(BaseModel):
-    """Partial dish edit: at least one field required (``active: false`` is
-    the deactivation; an explicit ``description: null`` clears it)."""
+    """Partial dish edit: at least one field required (``active: false``
+    makes the dish private, ``active: true`` publishes it; an explicit
+    ``description: null`` clears the description)."""
 
     model_config = ConfigDict(use_enum_values=True)
 
@@ -148,7 +159,7 @@ class DishPatchRequest(BaseModel):
     ingredients: list[str] | None = Field(default=None, max_length=INGREDIENT_MAX_COUNT)
     allergens: list[Allergen] | None = Field(default=None, max_length=len(ALLERGEN_VALUES))
     dietary_tags: list[str] | None = Field(default=None, max_length=TAG_MAX_COUNT)
-    active: bool | None = Field(default=None)
+    active: bool | None = Field(default=None, description=ACTIVE_DESCRIPTION)
 
     @field_validator("name")
     @classmethod
@@ -208,7 +219,7 @@ class DishOut(BaseModel):
     ingredients: list[str]
     allergens: list[Allergen]
     dietary_tags: list[str]
-    active: bool
+    active: bool = Field(description=ACTIVE_DESCRIPTION)
     created_at: UTCDateTime
     updated_at: UTCDateTime
 
@@ -222,6 +233,7 @@ class PublicDishOut(DishOut):
     cook_name: str | None = None
     zone: ZoneOut | None = None
     distance: int | None = None
+    rating: RatingOut = Field(default_factory=RatingOut)
 
 
 class PublicDishQuery(BaseModel):

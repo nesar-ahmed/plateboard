@@ -7,6 +7,10 @@ Mounted un-versioned under ``/api`` (same philosophy as ``/api/health``):
                              move a guest cart (if any) to the account
 * POST /api/auth/logout    - revoke the session, clear the cookie
 * GET  /api/me             - the authenticated user
+* PATCH /api/me/profile    - display name / bio / area
+* GET|PUT /api/me/preferences - food profile (excluded allergens, diets)
+* POST /api/me/password    - change password (signs out other sessions)
+* GET  /api/me/sessions    - active sessions; POST .../revoke-others ends them
 """
 
 from __future__ import annotations
@@ -20,8 +24,14 @@ from app.modules.auth import service
 from app.modules.auth.dependencies import CurrentSession, LoginRequired
 from app.modules.auth.schemas import (
     LoginRequest,
+    PasswordChangedOut,
+    PasswordChangeRequest,
+    PreferencesOut,
+    PreferencesUpdate,
     ProfilePatchRequest,
     RegisterRequest,
+    SessionOut,
+    SessionsRevokedOut,
     UserOut,
 )
 from app.modules.cart.cookies import clear_guest_cookie, read_guest_token
@@ -81,3 +91,55 @@ async def patch_profile(
     an empty body, blank string or oversized field is a 422."""
     updated = await service.update_profile(db, user, payload)
     return UserOut.model_validate(updated)
+
+
+@auth_router.get("/me/preferences", response_model=PreferencesOut)
+async def get_preferences(user: LoginRequired) -> PreferencesOut:
+    return PreferencesOut.model_validate(user, from_attributes=True)
+
+
+@auth_router.put("/me/preferences", response_model=PreferencesOut)
+async def put_preferences(
+    payload: PreferencesUpdate, user: LoginRequired, db: DbSession
+) -> PreferencesOut:
+    """Replace the food profile. Unknown allergens are a 422; diets follow
+    the dish-tag rules (trimmed, lowercase, unique, max 10)."""
+    updated = await service.update_preferences(db, user, payload)
+    return PreferencesOut.model_validate(updated, from_attributes=True)
+
+
+@auth_router.post("/me/password", response_model=PasswordChangedOut)
+async def change_password(
+    payload: PasswordChangeRequest,
+    user: LoginRequired,
+    current: CurrentSession,
+    db: DbSession,
+) -> PasswordChangedOut:
+    """Wrong current password -> 422 (``wrong_password`` on
+    ``current_password``). This session stays signed in; all others end."""
+    ended = await service.change_password(db, user, current, payload)
+    return PasswordChangedOut(signed_out_sessions=ended)
+
+
+@auth_router.get("/me/sessions", response_model=list[SessionOut])
+async def list_sessions(current: CurrentSession, db: DbSession) -> list[SessionOut]:
+    rows = await service.list_sessions(db, current.user_id)
+    return [
+        SessionOut(
+            id=row.token_hash[:12],
+            created_at=row.created_at,
+            expires_at=row.expires_at,
+            current=row.token_hash == current.token_hash,
+        )
+        for row in rows
+    ]
+
+
+@auth_router.post("/me/sessions/revoke-others", response_model=SessionsRevokedOut)
+async def revoke_other_sessions(
+    current: CurrentSession, db: DbSession
+) -> SessionsRevokedOut:
+    """Sign out everywhere else; this session stays."""
+    return SessionsRevokedOut(
+        signed_out_sessions=await service.revoke_other_sessions(db, current)
+    )

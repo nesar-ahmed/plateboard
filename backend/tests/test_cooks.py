@@ -38,14 +38,22 @@ async def test_cook_can_reach_cook_endpoints(accounts) -> None:
     assert response.json()["headline"] == COOK_BODY["headline"]
 
 
-# --- become-a-cook --------------------------------------------------------------
+# --- applying to cook (the whole review flow: tests/test_cook_applications.py) --------
 
 
-async def test_become_cook_adds_role_but_keeps_customer(accounts) -> None:
+async def test_applying_grants_nothing_until_accepted(accounts) -> None:
     await accounts.customer()
-    assert (await accounts.become_cook()).status_code == 201
+    applied = await accounts.become_cook()
+    assert applied.status_code == 201
+    assert applied.json()["status"] == "pending"
     me = await accounts.client.get("/api/me")
-    assert sorted(me.json()["roles"]) == ["cook", "customer"]
+    assert me.json()["roles"] == ["customer"]
+    assert (await accounts.client.get("/api/cooks/me")).status_code == 403
+
+    await accounts.approve()
+    me = await accounts.client.get("/api/me")
+    assert sorted(me.json()["roles"]) == ["cook", "customer"]  # roles only grow
+    assert (await accounts.client.get("/api/cooks/me")).json()["status"] == "accepted"
 
 
 async def test_new_accounts_default_to_customer_only(accounts) -> None:
@@ -55,12 +63,17 @@ async def test_new_accounts_default_to_customer_only(accounts) -> None:
     assert login.json()["roles"] == ["customer"]
 
 
-async def test_become_cook_twice_conflicts(accounts) -> None:
+async def test_applying_twice_conflicts(accounts) -> None:
     await accounts.customer()
     assert (await accounts.become_cook()).status_code == 201
     again = await accounts.become_cook()
     assert again.status_code == 409
-    assert again.json()["error"]["code"] == "already_cook"
+    assert again.json()["error"]["code"] == "application_pending"
+
+    await accounts.approve()
+    after = await accounts.become_cook()
+    assert after.status_code == 409
+    assert after.json()["error"]["code"] == "already_cook"
 
 
 async def test_become_cook_requires_login(accounts) -> None:

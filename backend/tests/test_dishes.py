@@ -360,6 +360,39 @@ async def test_deactivated_dish_disappears_from_public_menu(accounts) -> None:
     assert await public_ids(accounts.client) == {dish["id"]}
 
 
+async def test_a_dish_can_be_created_private_and_published_later(
+    accounts, make_client
+) -> None:
+    """``active`` is the public/private switch - also on create (a draft)."""
+    await accounts.cook()
+    draft = await create_dish(accounts, active=False)
+    assert draft["active"] is False
+    assert await public_ids(accounts.client) == set()
+    assert (await accounts.client.get(f"/api/dishes/{draft['id']}")).status_code == 404
+    assert [d["id"] for d in (await accounts.client.get("/api/me/dishes")).json()] == [
+        draft["id"]
+    ]
+
+    # Nobody can order a private dish - not even a guest who knows its id.
+    refused = await make_client().post("/api/cart/items", json={"dish_id": draft["id"]})
+    assert refused.status_code == 404
+
+    published = await accounts.client.patch(
+        f"/api/me/dishes/{draft['id']}", json={"active": True}
+    )
+    assert published.json()["active"] is True
+    assert await public_ids(accounts.client) == {draft["id"]}
+
+
+async def test_active_must_be_a_boolean(accounts) -> None:
+    await accounts.cook()
+    response = await accounts.client.post(
+        "/api/me/dishes", json={**DISH_BODY, "active": "sometimes"}
+    )
+    assert response.status_code == 422
+    assert response.json()["error"]["details"][0]["field"] == "active"
+
+
 # --- public search & pagination ---------------------------------------------------
 
 
