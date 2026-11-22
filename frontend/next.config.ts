@@ -16,6 +16,13 @@ const nextConfig: NextConfig = {
   // this flag makes Next remove the file instead.
   agentRules: false,
 
+  experimental: {
+    // Keep coding agents on the security policy: `next upgrade --agent` uses
+    // it by default, and dev/build surface a reminder when the installed
+    // Next.js version is affected by a published security advisory.
+    agentUpgrade: "security",
+  },
+
   // Forwards /api/* to the backend. Behind nginx this is a no-op (nginx
   // routes /api itself); it exists for hitting the Next server directly:
   // `next dev` locally, or a pm2-only VPS without a /api nginx rule.
