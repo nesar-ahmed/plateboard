@@ -1,38 +1,80 @@
-import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import type { Metadata, Viewport } from "next";
+import localFont from "next/font/local";
+import { GeistMono } from "geist/font/mono";
+import { GeistSans } from "geist/font/sans";
 
 import Nav from "@/components/nav";
 import Providers from "@/components/providers";
+import SiteFooter from "@/components/site-footer";
+import { THEME_SCRIPT } from "@/lib/theme";
 import "./globals.css";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
+/*
+ * Every font is self-hosted from node_modules (next/font/local): the build
+ * and the running server never call fonts.googleapis.com, so `npm run build`
+ * works offline and nothing is fetched at runtime.
+ *
+ * - Geist Sans / Mono (the `geist` package) - UI text
+ * - Fraunces (variable, @fontsource-variable/fraunces) - display headings
+ */
+const fraunces = localFont({
+  src: [
+    {
+      path: "../../node_modules/@fontsource-variable/fraunces/files/fraunces-latin-wght-normal.woff2",
+      style: "normal",
+    },
+    {
+      path: "../../node_modules/@fontsource-variable/fraunces/files/fraunces-latin-wght-italic.woff2",
+      style: "italic",
+    },
+  ],
+  variable: "--font-fraunces",
+  weight: "100 900",
+  display: "swap",
 });
 
 export const metadata: Metadata = {
-  title: "Plateboard",
-  description: "Home cooks, real kitchens, honest menus.",
+  title: {
+    default: "Plateboard - home-cooked food from your neighbourhood",
+    template: "%s · Plateboard",
+  },
+  description:
+    "Order dishes made by home cooks near you. Honest ingredients, every allergen declared, one kitchen per order.",
+};
+
+export const viewport: Viewport = {
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#fbf8f3" },
+    { media: "(prefers-color-scheme: dark)", color: "#14110f" },
+  ],
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
+    // suppressHydrationWarning: THEME_SCRIPT sets data-theme on <html> before
+    // React hydrates (on purpose - no flash of the wrong palette).
     <html
       lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      suppressHydrationWarning
+      className={`${GeistSans.variable} ${GeistMono.variable} ${fraunces.variable} h-full antialiased`}
     >
-      <body className="flex min-h-full flex-col bg-zinc-50 dark:bg-zinc-950">
+      <head>
+        {/* Render-blocking on purpose: picks light/dark before the first paint (lib/theme.ts). */}
+        <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
+      </head>
+      <body className="flex min-h-full flex-col bg-canvas text-ink">
+        <a
+          href="#main"
+          className="sr-only z-[60] rounded-full bg-ink px-4 py-2 text-sm font-medium text-canvas focus:not-sr-only focus:fixed focus:left-4 focus:top-4"
+        >
+          Skip to content
+        </a>
         <Providers>
           <Nav />
-          <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-8">{children}</main>
-          <footer className="border-t border-zinc-200 py-4 text-center text-xs text-zinc-400 dark:border-zinc-800">
-            Plateboard - cooked at home, listed in the open.
-          </footer>
+          <main id="main" className="flex-1">
+            {children}
+          </main>
+          <SiteFooter />
         </Providers>
       </body>
     </html>

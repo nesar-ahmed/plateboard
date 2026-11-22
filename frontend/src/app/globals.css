@@ -1,28 +1,181 @@
 @import "tailwindcss";
 
+/*
+ * Theme: <html data-theme="light|dark">, set before first paint by the
+ * inline script in layout.tsx (the visitor's choice from the navbar switch,
+ * else the system setting - see src/lib/theme.ts). Tailwind's `dark:`
+ * variant follows the same attribute, so the few legacy `dark:` classes
+ * (/health) switch with it.
+ */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+/*
+ * Plateboard design tokens - "warm editorial".
+ *
+ * Components use *semantic* colours (bg-canvas, bg-surface, text-ink,
+ * border-line, bg-brand, ...) instead of raw palette classes, so dark mode is
+ * one variable swap below rather than a `dark:` variant on every element.
+ *
+ *   canvas   page background (warm paper)      surface   cards, panels
+ *   muted    quiet fills (chips, inputs)       line      hairlines, borders
+ *   ink      text (+ -muted, -soft)            brand     ember - primary action
+ *   herb     dietary / success                 saffron   allergens / caution
+ *   danger   destructive + errors
+ */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --canvas: #fbf8f3;
+  --surface: #ffffff;
+  --muted: #f4efe7;
+  --line: #e9e1d6;
+  --line-strong: #d9cebf;
+  --ink: #1c1714;
+  --ink-muted: #6b615a;
+  --ink-soft: #988d84;
+  --brand: #c4471b;
+  --brand-strong: #a53a13;
+  --brand-soft: #fbeae1;
+  --on-brand: #ffffff;
+  --herb: #3f6b3a;
+  --herb-soft: #e8f0e4;
+  --saffron: #8f5405;
+  --saffron-soft: #fcf0d9;
+  --danger: #b42318;
+  --danger-soft: #fdecea;
+  --night: #1c1714; /* always-dark panels (auth, CTA bands) */
+  --on-night: #f7f1ea;
+  --shadow-tint: 28 23 20;
+  color-scheme: light;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+/* screen only: printouts (invoices) always use the light palette - paper is white. */
+@media screen {
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --canvas: #14110f;
+    --surface: #1c1815;
+    --muted: #26211d;
+    --line: #332c26;
+    --line-strong: #463d35;
+    --ink: #f5efe8;
+    --ink-muted: #b6aa9f;
+    --ink-soft: #877c72;
+    --brand: #e3693b;
+    --brand-strong: #f07f52;
+    --brand-soft: #3b2419;
+    --on-brand: #1a0f0a;
+    --herb: #93c489;
+    --herb-soft: #1f2a1c;
+    --saffron: #f0c475;
+    --saffron-soft: #33270f;
+    --danger: #f28b80;
+    --danger-soft: #3a1a17;
+    --night: #0d0b0a;
+    --on-night: #f7f1ea;
+    --shadow-tint: 0 0 0;
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  /* No font-family here: Tailwind's preflight already sets the theme's
-     --font-sans (Geist, loaded in layout.tsx) on <html>, and an explicit
-     body font would override it for the whole app. */
+@theme inline {
+  --color-canvas: var(--canvas);
+  --color-surface: var(--surface);
+  --color-muted: var(--muted);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-ink: var(--ink);
+  --color-ink-muted: var(--ink-muted);
+  --color-ink-soft: var(--ink-soft);
+  --color-brand: var(--brand);
+  --color-brand-strong: var(--brand-strong);
+  --color-brand-soft: var(--brand-soft);
+  --color-on-brand: var(--on-brand);
+  --color-herb: var(--herb);
+  --color-herb-soft: var(--herb-soft);
+  --color-saffron: var(--saffron);
+  --color-saffron-soft: var(--saffron-soft);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --color-night: var(--night);
+  --color-on-night: var(--on-night);
+
+  /* Fonts are self-hosted (see layout.tsx): no request to Google at build or run time. */
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+  --font-display: var(--font-fraunces), ui-serif, Georgia, serif;
+
+  --shadow-card: 0 1px 2px rgb(var(--shadow-tint) / 0.04), 0 10px 30px -14px rgb(var(--shadow-tint) / 0.16);
+  --shadow-lift: 0 2px 4px rgb(var(--shadow-tint) / 0.05), 0 22px 44px -18px rgb(var(--shadow-tint) / 0.28);
+  --shadow-pop: 0 24px 60px -12px rgb(var(--shadow-tint) / 0.35);
+
+  --animate-fade-in: fade-in 160ms ease-out;
+  --animate-slide-in: slide-in 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  --animate-rise: rise 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  --animate-pop: pop 240ms cubic-bezier(0.2, 0.8, 0.2, 1);
+
+  @keyframes fade-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+  @keyframes slide-in {
+    from { transform: translateX(100%); }
+    to { transform: translateX(0); }
+  }
+  @keyframes rise {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes pop {
+    0% { transform: scale(0.6); }
+    70% { transform: scale(1.15); }
+    100% { transform: scale(1); }
+  }
+}
+
+html {
+  background: var(--canvas);
+  color: var(--ink);
+  -webkit-tap-highlight-color: transparent;
+  scroll-behavior: smooth;
+  /* Keeps the sticky header from covering #anchor targets. */
+  scroll-padding-top: 5rem;
+}
+
+/* No font-family on body: Tailwind's preflight applies --font-sans on <html>. */
+
+::selection {
+  background: var(--brand-soft);
+  color: var(--ink);
+}
+
+/* One visible, on-brand focus ring for every interactive element. */
+:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    transition-duration: 1ms !important;
+  }
+}
+
+/* Subtle paper grain for the always-dark panels (auth, CTA). */
+.grain {
+  background-image: radial-gradient(rgb(255 255 255 / 0.05) 1px, transparent 1px);
+  background-size: 4px 4px;
+}
+
+@media print {
+  @page {
+    margin: 16mm;
+  }
+  html,
+  body {
+    background: #fff;
+  }
 }

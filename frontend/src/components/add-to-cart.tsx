@@ -1,10 +1,12 @@
 "use client";
 
+import { Plus, ShoppingBag } from "lucide-react";
 import { useState } from "react";
 
 import QuantityStepper from "@/components/quantity-stepper";
-import { primaryButtonClass } from "@/components/ui";
-import { useCart, type CartDish } from "@/lib/cart";
+import { Badge, Spinner, cx, primaryButtonClass } from "@/components/ui";
+import { useCart, type AddSource, type CartDish } from "@/lib/cart";
+import { formatMinorUnits } from "@/lib/format";
 import { useSession } from "@/lib/session";
 
 const MAX_QUANTITY = 100;
@@ -15,39 +17,68 @@ function useOwnDish(dish: CartDish): boolean {
   return user !== null && user.id === dish.cook_id;
 }
 
-/** Compact "Add to cart" for dish cards: adds one portion, opens the drawer. */
-export function AddToCartButton({ dish }: { dish: CartDish }) {
+/**
+ * Round "+ Add" for dish cards: adds one portion and opens the cart.
+ * `source="favourites"` adds through the favourites list (a saved dish);
+ * `onDone` hears whether it went in (false: refused - the drawer says why).
+ */
+export function AddToCartButton({
+  dish,
+  source = "menu",
+  onDone,
+}: {
+  dish: CartDish;
+  source?: AddSource;
+  onDone?: (added: boolean) => void;
+}) {
   const { add, busy } = useCart();
   const own = useOwnDish(dish);
+  const [pending, setPending] = useState(false);
   if (own) {
-    return <span className="text-xs text-zinc-400">Your dish</span>;
+    return <Badge tone="night">Your dish</Badge>;
   }
   return (
     <button
       type="button"
       disabled={busy}
-      onClick={() => void add(dish, 1)}
+      onClick={async () => {
+        setPending(true);
+        try {
+          onDone?.(await add(dish, 1, source));
+        } finally {
+          setPending(false);
+        }
+      }}
       aria-label={`Add ${dish.name} to cart`}
-      className="rounded-full bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+      className={cx(
+        "inline-flex h-10 items-center gap-1.5 rounded-full bg-surface pl-3 pr-4 text-sm font-semibold text-ink shadow-lift",
+        "ring-1 ring-black/5 transition-all hover:bg-ink hover:text-canvas active:scale-95 disabled:opacity-60",
+      )}
     >
-      Add to cart
+      {pending ? <Spinner /> : <Plus className="h-4 w-4" strokeWidth={2.5} aria-hidden="true" />}
+      Add
     </button>
   );
 }
 
 /** Quantity picker + "Add to cart" for the dish page. */
-export function AddToCartWithQuantity({ dish }: { dish: CartDish }) {
+export function AddToCartWithQuantity({ dish, price }: { dish: CartDish; price: number }) {
   const { add, busy } = useCart();
   const [quantity, setQuantity] = useState(1);
   const own = useOwnDish(dish);
   if (own) {
-    return <p className="text-sm text-zinc-500">This is your dish - customers order it from here.</p>;
+    return (
+      <p className="rounded-2xl bg-muted px-4 py-3 text-sm text-ink-muted">
+        This is your dish - customers order it from this page.
+      </p>
+    );
   }
   return (
-    <div className="flex flex-wrap items-center gap-4">
+    <div className="flex flex-wrap items-center gap-3">
       <QuantityStepper
         value={quantity}
         max={MAX_QUANTITY}
+        size="lg"
         label={`Quantity of ${dish.name}`}
         onStep={(delta) => setQuantity((current) => current + delta)}
       />
@@ -57,9 +88,10 @@ export function AddToCartWithQuantity({ dish }: { dish: CartDish }) {
         onClick={async () => {
           if (await add(dish, quantity)) setQuantity(1);
         }}
-        className={primaryButtonClass}
+        className={cx(primaryButtonClass, "h-12 flex-1 px-6 text-[15px] sm:flex-none")}
       >
-        {busy ? "Adding..." : "Add to cart"}
+        {busy ? <Spinner /> : <ShoppingBag className="h-4 w-4" aria-hidden="true" />}
+        Add to cart · {formatMinorUnits(price * quantity)}
       </button>
     </div>
   );

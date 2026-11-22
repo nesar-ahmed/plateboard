@@ -1,24 +1,37 @@
 "use client";
 
+import { Check } from "lucide-react";
 import { useState } from "react";
 
-import { ErrorBanner, Field, ghostButtonClass, inputClass, primaryButtonClass } from "@/components/ui";
+import {
+  ErrorBanner,
+  Field,
+  Select,
+  cx,
+  darkButtonClass,
+  inputClass,
+  quietButtonClass,
+} from "@/components/ui";
 import type { Zone } from "@/lib/api";
 import { ALLERGENS, type Allergen } from "@/lib/allergens";
-import { countActiveFilters, normalizeTags, type DishFilters } from "@/lib/dish-filters";
+import { normalizeTags, type DishFilters } from "@/lib/dish-filters";
 import { minorUnitsToInput, parseOptionalPriceToMinorUnits, splitList } from "@/lib/format";
 import { maxZoneSpan } from "@/lib/use-zones";
 
 const SAME_ZONE = "";
 
+/** Tags offered as one-tap chips; anything else goes in "Other tags". */
+export const COMMON_TAGS = ["vegetarian", "vegan", "gluten free", "halal", "spicy", "sweet"];
+
 /**
- * Search box + collapsible filter panel for the public menu.
+ * The filter form (zone + distance, price range, dietary tags, excluded
+ * allergens) - used in the desktop sidebar and the mobile sheet.
  *
  * Holds *draft* values only; nothing reaches the URL (and so the API) until
- * the form is submitted, which keeps typing cheap and the back button
- * meaningful. The parent remounts this component (`key`) whenever the applied
- * filters change from outside - a removed chip, back/forward - so the draft
- * always starts from what is applied.
+ * "Show results", which keeps the back button meaningful. The parent
+ * remounts it (`key`) whenever the applied filters change from outside - a
+ * removed chip, back/forward - so the draft always starts from what is
+ * applied. The text search lives in the page's search bar, not here.
  */
 export default function DishFiltersPanel({
   value,
@@ -33,23 +46,21 @@ export default function DishFiltersPanel({
   onApply: (filters: DishFilters) => void;
   onClear: () => void;
 }) {
-  const activeCount = countActiveFilters(value);
-  const [open, setOpen] = useState(activeCount > 0);
-  const [q, setQ] = useState(value.q);
   const [zone, setZone] = useState(value.zone);
   const [distance, setDistance] = useState(value.maxDistance === null ? SAME_ZONE : String(value.maxDistance));
   const [minPrice, setMinPrice] = useState(minorUnitsToInput(value.minPrice));
   const [maxPrice, setMaxPrice] = useState(minorUnitsToInput(value.maxPrice));
-  const [tags, setTags] = useState(value.dietaryTags.join(", "));
+  const [tags, setTags] = useState<string[]>(value.dietaryTags.filter((tag) => COMMON_TAGS.includes(tag)));
+  const [otherTags, setOtherTags] = useState(
+    value.dietaryTags.filter((tag) => !COMMON_TAGS.includes(tag)).join(", "),
+  );
   const [excluded, setExcluded] = useState<Allergen[]>(value.excludeAllergens);
   const [error, setError] = useState<string | null>(null);
 
   const span = zones ? maxZoneSpan(zones) : 0;
 
-  const toggleAllergen = (allergen: Allergen) =>
-    setExcluded((current) =>
-      current.includes(allergen) ? current.filter((held) => held !== allergen) : [...current, allergen],
-    );
+  const toggle = <T,>(list: T[], item: T) =>
+    list.includes(item) ? list.filter((held) => held !== item) : [...list, item];
 
   const submit = (event: React.FormEvent) => {
     event.preventDefault();
@@ -63,139 +74,151 @@ export default function DishFiltersPanel({
       return;
     }
     if (low !== null && high !== null && low > high) {
-      setError("the minimum price must not be above the maximum price");
+      setError("The minimum price must not be above the maximum price.");
       return;
     }
     setError(null);
     onApply({
-      q: q.trim(),
+      q: value.q, // the search bar owns the text query
       zone,
       maxDistance: zone && distance !== SAME_ZONE ? Number(distance) : null,
       minPrice: low,
       maxPrice: high,
-      dietaryTags: normalizeTags(splitList(tags)),
+      dietaryTags: normalizeTags([...tags, ...splitList(otherTags)]),
       // Keep the canonical enum order so URLs are stable.
       excludeAllergens: ALLERGENS.filter((allergen) => excluded.includes(allergen)),
     });
   };
 
   return (
-    <form onSubmit={submit} className="space-y-3" aria-label="Search and filter dishes">
-      <div className="flex flex-wrap gap-2">
+    <form onSubmit={submit} aria-label="Filter dishes" className="space-y-7">
+      <ErrorBanner lines={[...(error ? [error] : []), ...(zonesError ? [`Zones: ${zonesError}`] : [])]} />
+
+      <FilterGroup title="Location">
+        <div className="space-y-3">
+          <Field label="Neighbourhood">
+            <Select value={zone} onChange={(event) => setZone(event.target.value)} disabled={!zones}>
+              <option value="">Anywhere</option>
+              {(zones ?? []).map((option) => (
+                <option key={option.slug} value={option.slug}>
+                  {option.name}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <Field label="Distance" hint="In grid steps between neighbourhoods.">
+            <Select value={distance} onChange={(event) => setDistance(event.target.value)} disabled={!zone}>
+              <option value={SAME_ZONE}>Same neighbourhood</option>
+              {Array.from({ length: span }, (_, index) => index + 1).map((steps) => (
+                <option key={steps} value={String(steps)}>
+                  Within {steps} {steps === 1 ? "step" : "steps"}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        </div>
+      </FilterGroup>
+
+      <FilterGroup title="Price per portion">
+        <div className="grid grid-cols-2 gap-2">
+          <input
+            value={minPrice}
+            onChange={(event) => setMinPrice(event.target.value)}
+            inputMode="decimal"
+            placeholder="Min"
+            aria-label="Minimum price"
+            className={inputClass}
+          />
+          <input
+            value={maxPrice}
+            onChange={(event) => setMaxPrice(event.target.value)}
+            inputMode="decimal"
+            placeholder="Max"
+            aria-label="Maximum price"
+            className={inputClass}
+          />
+        </div>
+      </FilterGroup>
+
+      <FilterGroup title="Diet" hint="Dishes must match every tag you pick.">
+        <div className="flex flex-wrap gap-2">
+          {COMMON_TAGS.map((tag) => (
+            <Chip key={tag} active={tags.includes(tag)} onClick={() => setTags((held) => toggle(held, tag))}>
+              {tag}
+            </Chip>
+          ))}
+        </div>
         <input
-          value={q}
-          onChange={(event) => setQ(event.target.value)}
-          placeholder="Search dishes, descriptions, ingredients - e.g. smoky rice"
-          aria-label="Search dishes"
-          maxLength={120}
-          className={`${inputClass} max-w-md flex-1`}
+          value={otherTags}
+          onChange={(event) => setOtherTags(event.target.value)}
+          placeholder="Other tags, comma separated"
+          aria-label="Other dietary tags"
+          className={cx(inputClass, "mt-3")}
         />
-        <button type="submit" className={primaryButtonClass}>
-          Search
+      </FilterGroup>
+
+      <FilterGroup title="Leave out allergens" hint="Hides dishes that declare any of these.">
+        <div className="flex flex-wrap gap-2">
+          {ALLERGENS.map((allergen) => (
+            <Chip
+              key={allergen}
+              tone="saffron"
+              active={excluded.includes(allergen)}
+              onClick={() => setExcluded((held) => toggle(held, allergen))}
+            >
+              {allergen}
+            </Chip>
+          ))}
+        </div>
+      </FilterGroup>
+
+      {/* Sticky: "Show results" stays in reach in the sheet and the sidebar. */}
+      <div className="sticky bottom-0 -mx-5 flex gap-2 border-t border-line bg-surface px-5 py-4">
+        <button type="submit" className={cx(darkButtonClass, "flex-1")}>
+          Show results
         </button>
-        <button
-          type="button"
-          onClick={() => setOpen((shown) => !shown)}
-          aria-expanded={open}
-          aria-controls="dish-filters"
-          className={ghostButtonClass}
-        >
-          Filters{activeCount > 0 ? ` (${activeCount})` : ""}
+        <button type="button" onClick={onClear} className={quietButtonClass}>
+          Clear all
         </button>
       </div>
-
-      {open && (
-        <div
-          id="dish-filters"
-          className="space-y-4 rounded-2xl border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-950"
-        >
-          <ErrorBanner lines={[...(error ? [error] : []), ...(zonesError ? [`zones: ${zonesError}`] : [])]} />
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <Field label="Zone" hint="Where the cook's kitchen is.">
-              <select
-                value={zone}
-                onChange={(event) => setZone(event.target.value)}
-                disabled={!zones}
-                className={inputClass}
-              >
-                <option value="">Any zone</option>
-                {(zones ?? []).map((option) => (
-                  <option key={option.slug} value={option.slug}>
-                    {option.name}
-                  </option>
-                ))}
-              </select>
-            </Field>
-            <Field label="Distance" hint="Grid steps between zones.">
-              <select
-                value={distance}
-                onChange={(event) => setDistance(event.target.value)}
-                disabled={!zone}
-                className={inputClass}
-              >
-                <option value={SAME_ZONE}>Same zone only</option>
-                {Array.from({ length: span }, (_, index) => index + 1).map((steps) => (
-                  <option key={steps} value={String(steps)}>
-                    Within {steps} {steps === 1 ? "step" : "steps"}
-                  </option>
-                ))}
-              </select>
-            </Field>
-            <Field label="Min price">
-              <input
-                value={minPrice}
-                onChange={(event) => setMinPrice(event.target.value)}
-                inputMode="decimal"
-                placeholder="0.00"
-                className={inputClass}
-              />
-            </Field>
-            <Field label="Max price">
-              <input
-                value={maxPrice}
-                onChange={(event) => setMaxPrice(event.target.value)}
-                inputMode="decimal"
-                placeholder="any"
-                className={inputClass}
-              />
-            </Field>
-          </div>
-          <Field label="Dietary tags" hint="Comma separated; dishes must have all of them, e.g. vegan, gluten free.">
-            <input
-              value={tags}
-              onChange={(event) => setTags(event.target.value)}
-              placeholder="vegan, halal"
-              className={inputClass}
-            />
-          </Field>
-          <fieldset>
-            <legend className="mb-2 text-sm font-medium text-zinc-700 dark:text-zinc-300">
-              Exclude allergens
-            </legend>
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7">
-              {ALLERGENS.map((allergen) => (
-                <label key={allergen} className="flex items-center gap-2 text-sm text-zinc-700 dark:text-zinc-300">
-                  <input
-                    type="checkbox"
-                    checked={excluded.includes(allergen)}
-                    onChange={() => toggleAllergen(allergen)}
-                    className="h-4 w-4 rounded border-zinc-300 accent-emerald-600"
-                  />
-                  {allergen}
-                </label>
-              ))}
-            </div>
-          </fieldset>
-          <div className="flex gap-2">
-            <button type="submit" className={primaryButtonClass}>
-              Apply filters
-            </button>
-            <button type="button" onClick={onClear} className={ghostButtonClass}>
-              Clear all
-            </button>
-          </div>
-        </div>
-      )}
     </form>
+  );
+}
+
+function FilterGroup({ title, hint, children }: { title: string; hint?: string; children: React.ReactNode }) {
+  return (
+    <fieldset>
+      <legend className="text-sm font-semibold text-ink">{title}</legend>
+      {hint && <p className="mt-0.5 text-xs text-ink-soft">{hint}</p>}
+      <div className="mt-3">{children}</div>
+    </fieldset>
+  );
+}
+
+function Chip({
+  active,
+  tone = "herb",
+  onClick,
+  children,
+}: {
+  active: boolean;
+  tone?: "herb" | "saffron";
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  const on = tone === "herb" ? "border-herb bg-herb-soft text-herb" : "border-saffron bg-saffron-soft text-saffron";
+  return (
+    <button
+      type="button"
+      aria-pressed={active}
+      onClick={onClick}
+      className={cx(
+        "inline-flex h-8 items-center gap-1 rounded-full border px-3 text-[13px] font-medium capitalize transition-colors",
+        active ? on : "border-line-strong bg-surface text-ink-muted hover:border-ink-soft hover:text-ink",
+      )}
+    >
+      {active && <Check className="h-3.5 w-3.5" aria-hidden="true" />}
+      {children}
+    </button>
   );
 }

@@ -17,11 +17,22 @@ import { useSession } from "@/lib/session";
 /** What an "Add to cart" button knows about the dish it adds. */
 export type CartDish = { id: string; name: string; cook_id: string; cook_name?: string | null };
 
+/**
+ * Where an add comes from: the menu (`POST /api/cart/items`) or the
+ * customer's favourites (`POST /api/me/favourites/{id}/cart` - only for a
+ * saved dish, 409 `dish_unavailable` while its cook hides it). Both answer
+ * with the whole cart and share every cart rule, so the drawer treats them
+ * alike.
+ */
+export type AddSource = "menu" | "favourites";
+
 /** A refused add: the cart holds another cook's dishes (409 `different_cook`). */
 export type CookConflict = {
   dish: CartDish;
   quantity: number;
   cartCookName: string | null;
+  /** Retried the same way when the user starts a new cart. */
+  source: AddSource;
 };
 
 type CartState = {
@@ -39,7 +50,7 @@ type CartState = {
   openDrawer: () => void;
   closeDrawer: () => void;
   /** Add `quantity` portions; opens the drawer. Resolves false on failure or a conflict. */
-  add: (dish: CartDish, quantity?: number) => Promise<boolean>;
+  add: (dish: CartDish, quantity?: number, source?: AddSource) => Promise<boolean>;
   /** Confirm the pending conflict: empty the cart and start it with that dish. */
   startNewCart: () => Promise<boolean>;
   dismissConflict: () => void;
@@ -47,12 +58,22 @@ type CartState = {
   changeQuantity: (dishId: string, delta: number) => Promise<boolean>;
   remove: (dishId: string) => Promise<boolean>;
   clear: () => Promise<boolean>;
+  /** Re-read the cart from the server (e.g. after an order emptied it). */
+  reload: () => Promise<void>;
 };
 
 const CartContext = createContext<CartState | null>(null);
 
 function errorLines(cause: unknown): string[] {
   return cause instanceof ApiError ? cause.lines : ["Could not reach the API"];
+}
+
+/** The add request for `source` (see `AddSource`). */
+function addRequest(dish: CartDish, quantity: number, replaceCart: boolean, source: AddSource): Promise<Cart> {
+  const replace = replaceCart ? { replace_cart: true } : {};
+  return source === "favourites"
+    ? api.post<Cart>(`/me/favourites/${dish.id}/cart`, { quantity, ...replace })
+    : api.post<Cart>("/cart/items", { dish_id: dish.id, quantity, ...replace });
 }
 
 /**
@@ -97,6 +118,14 @@ export function CartProvider({ children }: { children: ReactNode }) {
     };
   }, [checked, userId]);
 
+  const reload = useCallback(async () => {
+    try {
+      setCart(await api.get<Cart>("/cart"));
+    } catch (cause) {
+      setErrors(errorLines(cause));
+    }
+  }, []);
+
   /** Run one cart request; its answer (the whole cart) becomes the state. */
   const run = useCallback(async (request: () => Promise<Cart>): Promise<boolean> => {
     setBusy(true);
@@ -113,25 +142,19 @@ export function CartProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const add = useCallback(
-    async (dish: CartDish, quantity = 1, replaceCart = false): Promise<boolean> => {
+    async (dish: CartDish, quantity = 1, replaceCart = false, source: AddSource = "menu"): Promise<boolean> => {
       rememberOpener();
       setBusy(true);
       setErrors([]);
       setConflict(null);
       try {
-        setCart(
-          await api.post<Cart>("/cart/items", {
-            dish_id: dish.id,
-            quantity,
-            ...(replaceCart ? { replace_cart: true } : {}),
-          }),
-        );
+        setCart(await addRequest(dish, quantity, replaceCart, source));
         setDrawerOpen(true);
         return true;
       } catch (cause) {
         if (cause instanceof ApiError && cause.code === "different_cook") {
           const details = cause.details as DifferentCookDetails | null;
-          setConflict({ dish, quantity, cartCookName: details?.cart_cook_name ?? null });
+          setConflict({ dish, quantity, cartCookName: details?.cart_cook_name ?? null, source });
         } else {
           setErrors(errorLines(cause));
         }
@@ -159,8 +182,9 @@ export function CartProvider({ children }: { children: ReactNode }) {
       setDrawerOpen(false);
       setConflict(null);
     },
-    add: (dish, quantity = 1) => add(dish, quantity),
-    startNewCart: () => (conflict ? add(conflict.dish, conflict.quantity, true) : Promise.resolve(false)),
+    add: (dish, quantity = 1, source = "menu") => add(dish, quantity, false, source),
+    startNewCart: () =>
+      conflict ? add(conflict.dish, conflict.quantity, true, conflict.source) : Promise.resolve(false),
     dismissConflict: () => setConflict(null),
     setQuantity: (dishId, quantity) =>
       run(() => api.patch<Cart>(`/cart/items/${dishId}`, { quantity })),
@@ -168,6 +192,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
       run(() => api.patch<Cart>(`/cart/items/${dishId}`, { delta })),
     remove: (dishId) => run(() => api.delete<Cart>(`/cart/items/${dishId}`)),
     clear: () => run(() => api.delete<Cart>("/cart")),
+    reload,
   };
 
   return <CartContext.Provider value={value}>{children}</CartContext.Provider>;

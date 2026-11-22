@@ -56,9 +56,20 @@ export function useSession(): Session {
  * this site ("/checkout"), never an absolute or protocol-relative URL
  * ("https://evil.example", "//evil.example") - no open redirects.
  */
-export function safeNextPath(next: string | null, fallback = "/dashboard"): string {
+export function safeNextPath(next: string | null, fallback = "/account"): string {
   if (!next || !next.startsWith("/") || next.startsWith("//") || next.startsWith("/\\")) {
     return fallback;
   }
   return next;
+}
+
+/**
+ * Where a role's panel lives - the landing page after login when no
+ * `?next=` was asked for: admins `/admin`, cooks `/cook` (their kitchen;
+ * `/account` stays one click away), everyone else `/account`.
+ */
+export function homeFor(user: User | null): string {
+  if (user?.roles.includes("admin")) return "/admin";
+  if (user?.roles.includes("cook")) return "/cook";
+  return "/account";
 }

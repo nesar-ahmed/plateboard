@@ -1,64 +1,132 @@
-"use client";
-
+import { MapPin } from "lucide-react";
 import Link from "next/link";
+import type { ReactNode } from "react";
 
 import { AddToCartButton } from "@/components/add-to-cart";
-import { AllergenTag, Card, Tag } from "@/components/ui";
+import DishArt from "@/components/dish-art";
+import FavouriteButton from "@/components/favourite-button";
+import { Avatar, cx } from "@/components/ui";
 import type { Dish } from "@/lib/api";
 import { formatDistance, formatMinorUnits } from "@/lib/format";
 
 /**
- * One public-menu dish: name, cook, price, the kitchen's zone (plus the grid
- * distance when the list was filtered by zone), dietary tags and allergens.
- * Used by the dish directory and the cook profile page.
+ * One public-menu dish. The whole card opens the dish (stretched title
+ * link); the cook link, the heart (save to favourites) and the add button
+ * sit above that layer. Server-safe: only the heart and the add button are
+ * Client Components.
+ *
+ * `preview` renders the same card inert - no links, no heart, no add button
+ * - for the cook's dish editor ("this is how customers will see it").
+ * `action` replaces the "+ Add" button (the favourites list adds through
+ * its own endpoint).
  */
-export default function DishCard({ dish, showCook = true }: { dish: Dish; showCook?: boolean }) {
+export default function DishCard({
+  dish,
+  showCook = true,
+  preview = false,
+  action,
+  className,
+}: {
+  dish: Dish;
+  showCook?: boolean;
+  preview?: boolean;
+  action?: ReactNode;
+  className?: string;
+}) {
+  const lead = dish.dietary_tags[0];
   return (
-    <Card>
-      <h3 className="text-base font-semibold text-zinc-900 dark:text-zinc-50">
-        <Link href={`/dishes/${dish.id}`} className="hover:underline">
-          {dish.name}
-        </Link>
-      </h3>
-      {showCook && (
-        <p className="mt-0.5 text-sm text-zinc-500 dark:text-zinc-400">
-          by{" "}
-          <Link href={`/cooks/${dish.cook_id}`} className="text-emerald-700 hover:underline dark:text-emerald-400">
-            {dish.cook_name ?? "an anonymous cook"}
-          </Link>
-        </p>
+    <article
+      className={cx(
+        "group relative flex h-full flex-col overflow-hidden rounded-3xl border border-line bg-surface shadow-card",
+        "transition-all duration-200 hover:-translate-y-0.5 hover:shadow-lift",
+        className,
       )}
-      <div className="mt-3 flex items-end justify-between gap-2">
-        <div>
-          <p className="font-mono text-lg text-zinc-900 dark:text-zinc-100">{formatMinorUnits(dish.price)}</p>
-          <p className="text-xs text-zinc-400">{dish.portions} portions</p>
-        </div>
-        <AddToCartButton dish={dish} />
-      </div>
-      {dish.zone && (
-        <p className="mt-2 flex flex-wrap items-center gap-1.5 text-xs text-zinc-500 dark:text-zinc-400">
-          <span>{dish.zone.name}</span>
+    >
+      <div className="relative">
+        <DishArt
+          dish={dish}
+          rounded="rounded-none"
+          className="aspect-[4/3] transition-transform duration-500 group-hover:scale-[1.03]"
+        />
+        <div className="absolute left-3 right-16 top-3 flex flex-wrap gap-1.5">
           {dish.distance != null && (
-            <span className="rounded-full bg-emerald-50 px-2 py-0.5 font-medium text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400">
+            <span className="rounded-full bg-surface/90 px-2.5 py-1 text-[11px] font-semibold text-ink shadow-sm backdrop-blur">
               {formatDistance(dish.distance)}
             </span>
           )}
-        </p>
-      )}
-      {dish.dietary_tags.length > 0 && (
-        <div className="mt-3 flex flex-wrap gap-1.5">
-          {dish.dietary_tags.map((tag) => (
-            <Tag key={tag}>{tag}</Tag>
-          ))}
+          {lead && (
+            <span className="rounded-full bg-black/55 px-2.5 py-1 text-[11px] font-semibold capitalize text-white backdrop-blur">
+              {lead}
+            </span>
+          )}
         </div>
-      )}
-      {dish.allergens.length > 0 && (
-        <div className="mt-2 flex flex-wrap gap-1.5">
-          {dish.allergens.map((allergen) => (
-            <AllergenTag key={allergen}>{allergen}</AllergenTag>
-          ))}
+        {!preview && (
+          <>
+            <div className="absolute right-3 top-3 z-10">
+              <FavouriteButton dish={dish} />
+            </div>
+            <div className="absolute bottom-3 right-3 z-10">{action ?? <AddToCartButton dish={dish} />}</div>
+          </>
+        )}
+      </div>
+
+      <div className="flex flex-1 flex-col p-4 sm:p-5">
+        <div className="flex items-start justify-between gap-3">
+          <h3 className="font-display text-lg font-semibold leading-snug tracking-tight text-ink">
+            {preview ? (
+              dish.name
+            ) : (
+              <Link
+                href={`/dishes/${dish.id}`}
+                className="after:absolute after:inset-0 after:content-[''] focus-visible:outline-none"
+              >
+                {dish.name}
+              </Link>
+            )}
+          </h3>
+          <p className="shrink-0 font-display text-lg font-semibold tabular-nums text-ink">
+            {formatMinorUnits(dish.price)}
+          </p>
         </div>
-      )}
-    </Card>
+
+        {dish.description && (
+          <p className="mt-1.5 line-clamp-2 text-sm leading-relaxed text-ink-muted">{dish.description}</p>
+        )}
+
+        <div className="mt-auto pt-4">
+          {dish.allergens.length > 0 ? (
+            <p className="mb-3 text-xs text-saffron">
+              <span className="font-semibold">Contains:</span> {dish.allergens.join(", ")}
+            </p>
+          ) : (
+            <p className="mb-3 text-xs text-herb">No declared allergens</p>
+          )}
+          <div className="flex items-center justify-between gap-3 border-t border-line pt-3 text-xs text-ink-muted">
+            {showCook && preview ? (
+              <span className="flex min-w-0 items-center gap-2 font-medium text-ink">
+                <Avatar name={dish.cook_name} size="sm" className="h-6 w-6 text-[10px]" />
+                <span className="truncate">{dish.cook_name ?? "Home cook"}</span>
+              </span>
+            ) : showCook ? (
+              <Link
+                href={`/cooks/${dish.cook_id}`}
+                className="relative z-10 flex min-w-0 items-center gap-2 font-medium text-ink hover:text-brand"
+              >
+                <Avatar name={dish.cook_name} size="sm" className="h-6 w-6 text-[10px]" />
+                <span className="truncate">{dish.cook_name ?? "Home cook"}</span>
+              </Link>
+            ) : (
+              <span>{dish.portions} portions</span>
+            )}
+            {dish.zone && (
+              <span className="flex shrink-0 items-center gap-1">
+                <MapPin className="h-3.5 w-3.5" aria-hidden="true" />
+                {dish.zone.name}
+              </span>
+            )}
+          </div>
+        </div>
+      </div>
+    </article>
   );
 }
